@@ -1,0 +1,114 @@
+import Foundation
+
+/// Where a task came from. Manual for v1; Blackbaud iCal import later.
+public enum TaskSource: Codable, Equatable, Sendable {
+    case manual
+    case blackbaud(uid: String)
+}
+
+public enum Verdict: String, Codable, Equatable, Sendable {
+    case accepted
+    case rejected
+    case error
+    case guardianApproved
+}
+
+public struct ProofSubmission: Codable, Identifiable, Equatable, Sendable {
+    public var id: UUID
+    public var submittedAt: Date
+    public var note: String
+    /// File names inside this submission's proof folder.
+    public var attachments: [String]
+    /// nil while the auditor is still checking.
+    public var verdict: Verdict?
+    public var reason: String
+
+    public init(id: UUID = UUID(), submittedAt: Date, note: String, attachments: [String],
+                verdict: Verdict? = nil, reason: String = "") {
+        self.id = id
+        self.submittedAt = submittedAt
+        self.note = note
+        self.attachments = attachments
+        self.verdict = verdict
+        self.reason = reason
+    }
+
+    public var isAccepted: Bool { verdict == .accepted || verdict == .guardianApproved }
+}
+
+public enum TaskStatus: Codable, Equatable, Sendable {
+    case pending
+    case proven(at: Date)
+    case provenLate(at: Date, penaltyEndsAt: Date)
+    case excused(at: Date)
+}
+
+public struct TaxTask: Codable, Identifiable, Equatable, Sendable {
+    public var id: UUID
+    public var title: String
+    public var details: String
+    public var dueDate: Date
+    public var createdAt: Date
+    public var source: TaskSource
+    public var status: TaskStatus
+    public var proofs: [ProofSubmission]
+
+    public init(id: UUID = UUID(), title: String, details: String = "", dueDate: Date,
+                createdAt: Date, source: TaskSource = .manual, status: TaskStatus = .pending,
+                proofs: [ProofSubmission] = []) {
+        self.id = id
+        self.title = title
+        self.details = details
+        self.dueDate = dueDate
+        self.createdAt = createdAt
+        self.source = source
+        self.status = status
+        self.proofs = proofs
+    }
+
+    public var isPending: Bool { status == .pending }
+
+    /// A proof sent in before the deadline that the auditor hasn't ruled on yet.
+    /// While one exists the task doesn't count as overdue, so a slow check can't make you late.
+    public var hasCheckInFlightFromBeforeDue: Bool {
+        proofs.contains { $0.verdict == nil && $0.submittedAt <= dueDate }
+    }
+}
+
+public struct Settings: Codable, Equatable, Sendable {
+    public var penaltyMinutes: Int
+    /// Apps the guardian added on top of the built-in allowlist.
+    public var extraAllowedBundleIDs: [String]
+    public var claudePath: String
+    public var claudeModel: String
+    public var overrideUntil: Date?
+    /// Latest time this app has seen, used so winding the clock back doesn't undo a deadline.
+    public var lastSeen: Date?
+    public var guardianFailures: Int
+    public var guardianLockedUntil: Date?
+
+    public init() {
+        penaltyMinutes = 30
+        extraAllowedBundleIDs = []
+        claudePath = "/opt/homebrew/bin/claude"
+        claudeModel = "sonnet"
+        overrideUntil = nil
+        lastSeen = nil
+        guardianFailures = 0
+        guardianLockedUntil = nil
+    }
+
+    // Decode field by field so adding a setting later doesn't wipe saved ones.
+    public init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        penaltyMinutes = try c.decodeIfPresent(Int.self, forKey: .penaltyMinutes) ?? penaltyMinutes
+        extraAllowedBundleIDs = try c.decodeIfPresent([String].self, forKey: .extraAllowedBundleIDs) ?? []
+        claudePath = try c.decodeIfPresent(String.self, forKey: .claudePath) ?? claudePath
+        claudeModel = try c.decodeIfPresent(String.self, forKey: .claudeModel) ?? claudeModel
+        overrideUntil = try c.decodeIfPresent(Date.self, forKey: .overrideUntil)
+        lastSeen = try c.decodeIfPresent(Date.self, forKey: .lastSeen)
+        guardianFailures = try c.decodeIfPresent(Int.self, forKey: .guardianFailures) ?? 0
+        guardianLockedUntil = try c.decodeIfPresent(Date.self, forKey: .guardianLockedUntil)
+    }
+}

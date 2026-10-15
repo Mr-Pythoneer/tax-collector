@@ -1,0 +1,41 @@
+#!/bin/bash
+# Builds, installs to ~/Applications and starts Tax Collector at login via a LaunchAgent.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+LABEL="io.github.mrpythoneer.taxcollector"
+DEST="$HOME/Applications/Tax Collector.app"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+DOMAIN="gui/$(id -u)"
+
+./scripts/build-app.sh
+
+launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+mkdir -p "$HOME/Applications" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+rm -rf "$DEST"
+cp -R "build/Tax Collector.app" "$DEST"
+
+cat > "$PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>$LABEL</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$DEST/Contents/MacOS/TaxCollector</string>
+        <string>--launchd</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>ThrottleInterval</key><integer>2</integer>
+    <key>ProcessType</key><string>Interactive</string>
+    <key>LimitLoadToSessionType</key><string>Aqua</string>
+    <key>StandardOutPath</key><string>$HOME/Library/Logs/TaxCollector.log</string>
+    <key>StandardErrorPath</key><string>$HOME/Library/Logs/TaxCollector.log</string>
+</dict>
+</plist>
+PLIST
+
+launchctl bootstrap "$DOMAIN" "$PLIST"
+echo "Installed to $DEST and started. It will start at every login."
