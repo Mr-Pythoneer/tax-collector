@@ -16,7 +16,7 @@ DOMAIN="gui/$(id -u)"
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
 mkdir -p "$(dirname "$DEST")" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
 rm -rf "$DEST"
-cp -R "build/Tax Collector.app" "$DEST"
+cp -R "build.noindex/Tax Collector.app" "$DEST"
 
 ENV_ENTRIES=""
 while IFS='=' read -r name value; do

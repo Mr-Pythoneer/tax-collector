@@ -44,7 +44,7 @@ curl -fsSL https://claude.ai/install.sh | bash
 claude auth login
 ```
 
-`./scripts/make-dmg.sh` builds the disk image, with `Resources/How to Install.txt` inside it.
+`./scripts/make-dmg.sh` builds the disk image into `build.noindex/`, with `Resources/How to Install.txt` inside it. Build output goes in `build.noindex/` so Spotlight lists only the installed app.
 
 ## Build and install
 
@@ -70,7 +70,7 @@ The proof check runs `claude -p` in the background, so the CLI must be signed in
 ### Test mode
 
 ```bash
-TAXCOLLECTOR_DATA_DIR=/tmp/tc-test TAXCOLLECTOR_DRY_RUN=1 "build/Tax Collector.app/Contents/MacOS/TaxCollector"
+TAXCOLLECTOR_DATA_DIR=/tmp/tc-test TAXCOLLECTOR_DRY_RUN=1 "build.noindex/Tax Collector.app/Contents/MacOS/TaxCollector"
 ```
 
 - `TAXCOLLECTOR_DATA_DIR` uses separate data and skips the single-instance check.

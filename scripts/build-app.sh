@@ -1,11 +1,12 @@
 #!/bin/bash
-# Builds "build/Tax Collector.app" (arm64 only) and ad-hoc signs it.
+# Builds "build.noindex/Tax Collector.app" (arm64 only) and ad-hoc signs it.
+# The ".noindex" keeps Spotlight from listing this copy next to the installed one.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 swift build -c release --arch arm64
 BIN="$(swift build -c release --arch arm64 --show-bin-path)/TaxCollector"
-APP="build/Tax Collector.app"
+APP="build.noindex/Tax Collector.app"
 VERSION="0.3.0"
 
 rm -rf "$APP"

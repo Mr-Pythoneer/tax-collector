@@ -50,7 +50,7 @@ func render(_ px: Int) -> Data {
 }
 
 let fm = FileManager.default
-let set = URL(fileURLWithPath: "build/AppIcon.iconset")
+let set = URL(fileURLWithPath: "build.noindex/AppIcon.iconset")
 try? fm.removeItem(at: set)
 try! fm.createDirectory(at: set, withIntermediateDirectories: true)
 for base in [16, 32, 128, 256, 512] {
