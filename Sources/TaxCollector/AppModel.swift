@@ -79,7 +79,7 @@ final class AppModel {
         for t in tasks.indices {
             for p in tasks[t].proofs.indices where tasks[t].proofs[p].verdict == nil {
                 tasks[t].proofs[p].verdict = .error
-                tasks[t].proofs[p].reason = "The check was interrupted. Send it again."
+                tasks[t].proofs[p].reason = "The check was interrupted. Try again."
                 interrupted = true
             }
         }
@@ -135,11 +135,11 @@ final class AppModel {
     private func lockChanged() {
         if lock.isLocked {
             closedApps.removeAll()
-            let owed = (lock.overdue + lock.penalties).map(\.title).joined(separator: ", ")
-            store.log("LOCK ON — owed: \(owed)")
+            let due = (lock.overdue + lock.penalties).map(\.title).joined(separator: ", ")
+            store.log("LOCK ON — overdue: \(due)")
             enforcer.activate()
         } else {
-            store.log(lock.overrideUntil != nil ? "LOCK OFF — guardian unlock" : "LOCK OFF — paid in full")
+            store.log(lock.overrideUntil != nil ? "LOCK OFF — guardian unlock" : "LOCK OFF — proof accepted")
             enforcer.deactivate()
         }
         onLockChange(lock.isLocked)
@@ -534,7 +534,7 @@ final class AppModel {
     func setPenalty(minutes: Int) {
         settings.penaltyMinutes = max(0, minutes)
         store.saveSettings(settings)
-        store.log("GUARDIAN set late fee to \(settings.penaltyMinutes) min")
+        store.log("GUARDIAN set the late penalty to \(settings.penaltyMinutes) min")
     }
 
     func allowApp(bundleID: String) {

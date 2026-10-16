@@ -23,7 +23,7 @@ struct GuardianView: View {
 
     private var gate: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Guardian").font(Theme.title(20))
+            Text("Guardian Code").font(.title2.bold())
             Text("Hand the Mac to your guardian. Their code can unlock, excuse a task or change the rules.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -31,7 +31,7 @@ struct GuardianView: View {
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(check)
             if !message.isEmpty {
-                Text(message).font(.callout).foregroundStyle(Theme.stamp)
+                Text(message).font(.callout).foregroundStyle(.red)
             }
             HStack {
                 Spacer()
@@ -41,6 +41,16 @@ struct GuardianView: View {
         }
         .padding(20)
         .frame(width: 420)
+        .onAppear(perform: typeTestCode)
+    }
+
+    /// Testing aid: `TAXCOLLECTOR_TEST_GUARDIAN_CODE` types the code in, as if the guardian had.
+    /// It goes through the normal check, so it only works with the right code.
+    private func typeTestCode() {
+        guard let testCode = ProcessInfo.processInfo.environment["TAXCOLLECTOR_TEST_GUARDIAN_CODE"],
+              !testCode.isEmpty, !unlocked else { return }
+        code = testCode
+        check()
     }
 
     private func check() {
@@ -70,7 +80,7 @@ private struct GuardianPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Guardian panel").font(Theme.title(20))
+                Text("Guardian Settings").font(.title2.bold())
                 Spacer()
                 Button("Done", action: dismiss).keyboardShortcut(.defaultAction)
             }
@@ -82,7 +92,7 @@ private struct GuardianPanel: View {
                 rulesSection
                 codeSection
                 Section {
-                    Button("Reset clock guard") { model.resetClockGuard() }
+                    Button("Reset Clock Guard") { model.resetClockGuard() }
                         .help("Use this if the Mac's clock was wrong and Tax Collector thinks it's later than it is.")
                     Button("Uninstall Tax Collector…", role: .destructive) { confirmUninstall = true }
                 } header: {
@@ -90,7 +100,6 @@ private struct GuardianPanel: View {
                 }
             }
             .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
         }
         .frame(width: 560, height: 620)
         .onAppear { penalty = model.settings.penaltyMinutes }
@@ -107,7 +116,7 @@ private struct GuardianPanel: View {
                 HStack {
                     Text("Unlocked until \(Fmt.dateTime.string(from: until))")
                     Spacer()
-                    Button("End now") { model.endUnlock() }
+                    Button("End Now") { model.endUnlock() }
                 }
             }
             HStack {
@@ -116,7 +125,7 @@ private struct GuardianPanel: View {
                 Button("3 hours") { model.unlock(hours: 3) }
                 Button("1 day") { model.unlock(hours: 24) }
             }
-            Text("An unlock pauses the lock. Debts stay owed and lock again when it ends.")
+            Text("An unlock pauses the lock. Anything still overdue locks the Mac again when it ends.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -124,21 +133,25 @@ private struct GuardianPanel: View {
     private var tasksSection: some View {
         Section("Tasks") {
             if model.pendingTasks.isEmpty {
-                Text("Nothing owed.").foregroundStyle(.secondary)
+                Text("Nothing due.").foregroundStyle(.secondary)
             }
             ForEach(model.pendingTasks) { task in
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(task.title).font(.body.weight(.medium))
+                    HStack(alignment: .top) {
+                        let parts = Agenda.courseAndTitle(task)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(parts.title).font(.body.weight(.medium))
+                            if parts.course != nil { CourseLabel(task) }
+                        }
                         Spacer()
-                        let (t, c) = task.stamp(now: model.now, checking: false)
-                        StampLabel(text: t, color: c)
+                        let (t, c) = task.statusWord(now: model.now, checking: false)
+                        Text(t).font(.caption).foregroundStyle(c)
                     }
                     if task.isPending {
                         HStack {
                             DatePicker("Due", selection: dueBinding(task), displayedComponents: [.date, .hourAndMinute])
                                 .labelsHidden()
-                            Button("Save deadline") {
+                            Button("Save Deadline") {
                                 var edited = task
                                 edited.dueDate = editingDue[task.id] ?? task.dueDate
                                 _ = model.saveEdit(edited, guardianApproved: true)
@@ -149,7 +162,7 @@ private struct GuardianPanel: View {
                     }
                     HStack {
                         if task.isPending {
-                            Button("Approve latest proof") { model.approveLatestProof(task.id) }
+                            Button("Approve Proof") { model.approveLatestProof(task.id) }
                         }
                         Button("Excuse") { model.excuse(task.id) }
                         Button("Delete", role: .destructive) { _ = model.delete(task.id, guardianApproved: true) }
@@ -167,11 +180,11 @@ private struct GuardianPanel: View {
                 HStack {
                     Text("Blackbaud import is on")
                     Spacer()
-                    Button("Turn off") { _ = model.stopFeed(guardianApproved: true) }
+                    Button("Turn Off") { _ = model.stopFeed(guardianApproved: true) }
                 }
             }
             Stepper(value: $penalty, in: 0...240, step: 5) {
-                Text("Late fee: \(penalty) min locked after late proof")
+                Text("Late penalty: \(penalty) minutes locked after late proof")
             }
             .onChange(of: penalty) { _, value in model.setPenalty(minutes: value) }
 
@@ -187,7 +200,7 @@ private struct GuardianPanel: View {
                         Button("Remove") { model.disallowApp(bundleID: id) }.controlSize(.small)
                     }
                 }
-                Button("Add app…", action: addApp).controlSize(.small)
+                Button("Add App…", action: addApp).controlSize(.small)
             }
         }
     }
@@ -197,7 +210,7 @@ private struct GuardianPanel: View {
             SecureField("New code (6+ characters)", text: $newCode)
             SecureField("Repeat new code", text: $newCode2)
             HStack {
-                Button("Change code") {
+                Button("Change Code") {
                     guard newCode.count >= Guardian.minimumLength else {
                         codeMessage = "Use at least \(Guardian.minimumLength) characters."
                         return

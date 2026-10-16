@@ -9,6 +9,9 @@ final class Enforcer {
     private(set) var isActive = false
     let dryRun: Bool
     var isAllowed: (String?) -> Bool = { _ in true }
+    /// Testing aid: when set, only these apps are ever closed, so a real lock can be tested
+    /// without closing anything else you have open.
+    var onlyTargets: Set<String>?
     var onClosed: (String) -> Void = { _ in }
     var log: (String) -> Void = { _ in }
 
@@ -56,6 +59,7 @@ final class Enforcer {
 
         for app in running where app.activationPolicy == .regular && !app.isTerminated && app.processIdentifier != me {
             if isAllowed(app.bundleIdentifier) { continue }
+            if let onlyTargets, !onlyTargets.contains(app.bundleIdentifier ?? "") { continue }
             collect(app)
         }
     }

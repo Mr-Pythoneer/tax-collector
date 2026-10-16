@@ -24,20 +24,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         let env = ProcessInfo.processInfo.environment
         let dryRun = env["TAXCOLLECTOR_DRY_RUN"] == "1"
         let testing = !(env["TAXCOLLECTOR_DATA_DIR"] ?? "").isEmpty
-        canQuitFreely = dryRun || testing
+        canQuitFreely = dryRun || env["TAXCOLLECTOR_ALLOW_QUIT"] == "1"
         if !testing { enforceSingleInstance() }
 
         model = AppModel(store: Store(), dryRun: dryRun)
+        if let only = env["TAXCOLLECTOR_ENFORCE_ONLY"], !only.isEmpty {
+            model.enforcer.onlyTargets = Set(only.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
+        }
         Theme.apply(model.settings.appearance)
         model.onLockChange = { [weak self] in self?.lockChanged($0) }
         model.onWarning = { [weak self] in self?.warn($0, remaining: $1) }
         model.onClosedApp = { [weak self] name in
             guard let self else { return }
             self.showLockWindow()
-            self.showBanner(self.model.dryRun ? "Would close \(name)" : "Closed \(name). Pay up first.")
+            self.showBanner(self.model.dryRun ? "Test mode: would have closed \(name)" : "Closed \(name). Submit proof to unlock.")
         }
         model.onPaid = { [weak self] task in
-            self?.notify("Paid: \(task.title)", "The auditor accepted your proof.")
+            self?.notify("Proof accepted", Agenda.courseAndTitle(task).title)
         }
         blackbaudLink.sessionFile = model.store.dir.appendingPathComponent("blackbaud-session.plist")
         blackbaudLink.configure(feedURL: model.feedURL)
@@ -88,7 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         model.onImported = { [weak self] added in
             guard let self, let next = added.min(by: { $0.dueDate < $1.dueDate }) else { return }
             let title = added.count == 1 ? "New from Blackbaud: \(next.title)" : "\(added.count) assignments from Blackbaud"
-            var body = "Next: \(next.title), \(Fmt.due(next, now: self.model.now))."
+            var body = "Next: \(Agenda.courseAndTitle(next).title), due \(Fmt.relative(next.dueDate, now: self.model.now))."
             if next.dueDate.timeIntervalSince(self.model.now) <= LockPolicy.freezeWindow {
                 body += " Due within a day, so it locks in after 5 minutes."
             }
@@ -112,6 +115,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         model.start()
         let startedAtLogin = CommandLine.arguments.contains("--launchd")
         if model.guardian == nil || !startedAtLogin { showMain() }
+
+        // Testing aids: open one sheet for a screenshot, or run the self-test and quit.
+        if let spec = env["TAXCOLLECTOR_TEST_SHEET"], !spec.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.openTestSheet(spec) }
+        }
+        if env["TAXCOLLECTOR_SELFTEST"] == "1" {
+            Task {
+                let report = await SelfTest.run(model: self.model)
+                try? report.write(to: self.model.store.dir.appendingPathComponent("selftest.txt"), atomically: true, encoding: .utf8)
+                self.model.allowQuit = true
+                NSApp.terminate(nil)
+            }
+        }
+    }
+
+    /// `TAXCOLLECTOR_TEST_SHEET=name` or `name:part of a task title`.
+    private func openTestSheet(_ spec: String) {
+        let parts = spec.split(separator: ":", maxSplits: 1).map(String.init)
+        let task = parts.count > 1
+            ? model.tasks.first { $0.title.localizedCaseInsensitiveContains(parts[1]) }
+            : model.tasks.first(where: \.isPending)
+        let sheet: Sheet? = switch parts[0] {
+        case "new": .newTask
+        case "edit": task.map { .edit($0.id) }
+        case "proof": task.map { .proof($0.id) }
+        case "lastcheck": task.map { .lastCheck($0.id) }
+        case "guardian": .guardian
+        case "log": .log
+        case "auditor": .auditor
+        case "blackbaud": .blackbaud
+        default: nil
+        }
+        if parts[0] == "lock" {
+            showLockWindow()
+        } else if let sheet {
+            showMain()
+            router.mainSheet = sheet
+        }
     }
 
     /// Testing aid, only with `TAXCOLLECTOR_TEST_LAST_CHECK=<part of a task title>`: opens that task's
@@ -174,21 +215,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private func lockChanged(_ locked: Bool) {
         if locked {
             showLockWindow()
-            let owed = model.lock.overdue.map(\.title)
-            if owed.isEmpty {
-                notify("Late fee", "Proof accepted late. Locked a little longer.")
+            let overdue = model.lock.overdue.map { Agenda.courseAndTitle($0).title }
+            if overdue.isEmpty {
+                notify("Late penalty", "Your proof was late, so the Mac stays locked a little longer.")
             } else {
-                notify("The Tax Collector is here", "Overdue: \(owed.joined(separator: ", ")). Other apps will close until you pay.")
+                notify("Your Mac is locked", "Overdue: \(overdue.joined(separator: ", ")). Other apps will close until you submit proof.")
             }
         } else {
             lockWindow?.close()
             lockWindow = nil
             router.lockSheet = nil
             if model.lock.overrideUntil == nil {
-                showBanner("Paid up. Everything's unlocked.")
-                notify("Paid up", "Everything's unlocked.")
+                showBanner("Unlocked.")
+                notify("Unlocked", "Everything is open again.")
             } else {
-                showBanner("Guardian unlock until \(Fmt.time.string(from: model.lock.overrideUntil!)).")
+                showBanner("Unlocked by your guardian until \(Fmt.time.string(from: model.lock.overrideUntil!)).")
             }
         }
         refreshStatusItem()
@@ -196,11 +237,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     private func warn(_ task: TaxTask, remaining: TimeInterval) {
         let left = Fmt.span(remaining)
+        let name = Agenda.courseAndTitle(task).title
         if remaining <= 5 * 60 {
-            notify("Lockdown in \(left)", "“\(task.title)” isn't paid. Save your work in other apps now.")
-            showBanner("Lockdown in \(left) unless “\(task.title)” is paid. Save your work.")
+            notify("Locking in \(left)", "“\(name)” has no proof yet. Save your work in other apps.")
+            showBanner("Locking in \(left) unless “\(name)” has proof. Save your work.")
         } else {
-            notify("“\(task.title)” is due in \(left)", "Pay with proof before the deadline to stay unlocked.")
+            notify("“\(name)” is due in \(left)", "Submit proof before then to keep your Mac unlocked.")
         }
     }
 
@@ -209,8 +251,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     func showMain() {
         if mainWindow == nil {
             let view = MainView(openLockWindow: { [weak self] in self?.showLockWindow() })
-            mainWindow = makeWindow(title: "Tax Collector", size: NSSize(width: 640, height: 600),
-                                    closable: true, content: view)
+            mainWindow = makeWindow(title: "Tax Collector", size: NSSize(width: 680, height: 620),
+                                    closable: true, toolbar: true, content: view)
             mainWindow?.setFrameAutosaveName("TaxCollectorMain")
         }
         NSApp.activate()
@@ -220,22 +262,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private func showLockWindow() {
         guard model.lock.isLocked else { return }
         if lockWindow == nil {
-            lockWindow = makeWindow(title: "Pay Up", size: NSSize(width: 680, height: 600),
-                                    closable: false, content: LockScreenView())
+            lockWindow = makeWindow(title: "Tax Collector — Locked", size: NSSize(width: 620, height: 520),
+                                    closable: false, toolbar: false, content: LockScreenView())
         }
         lockWindow?.deminiaturize(nil)
         NSApp.activate()
         lockWindow?.makeKeyAndOrderFront(nil)
     }
 
-    private func makeWindow<V: View>(title: String, size: NSSize, closable: Bool, content: V) -> NSWindow {
+    private func makeWindow<V: View>(title: String, size: NSSize, closable: Bool, toolbar: Bool, content: V) -> NSWindow {
         var style: NSWindow.StyleMask = [.titled, .miniaturizable, .resizable]
         if closable { style.insert(.closable) }
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: style,
                               backing: .buffered, defer: false)
         window.title = title
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: content.environment(model).environment(router))
+        let hosting = NSHostingView(rootView: content.environment(model).environment(router))
+        if toolbar {
+            // Let the SwiftUI toolbar and title become the window's own.
+            hosting.sceneBridgingOptions = [.toolbars, .title]
+            window.toolbarStyle = .unified
+        }
+        window.contentView = hosting
         window.center()
         return window
     }
@@ -306,12 +354,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         menu.addItem(header)
         menu.addItem(.separator())
         if model.lock.isLocked {
-            menu.addItem(item("Pay Up…", #selector(menuPayUp)))
+            menu.addItem(item("Submit Proof…", #selector(menuPayUp)))
         }
         menu.addItem(item("Open Tax Collector", #selector(menuOpen), key: "o"))
         menu.addItem(item("New Task…", #selector(menuNewTask), key: "n"))
         menu.addItem(.separator())
+        menu.addItem(item("Blackbaud…", #selector(menuBlackbaud)))
         menu.addItem(item("Guardian…", #selector(menuGuardian)))
+        menu.addItem(item("Activity Log…", #selector(menuLog)))
+        let appearance = NSMenuItem(title: "Appearance", action: nil, keyEquivalent: "")
+        let choices = NSMenu()
+        let current = Theme.appearanceName(model.settings.appearance)
+        for (title, value) in [("Light", "light"), ("Dark", "dark"), ("Match System", "system")] {
+            let choice = item(title, #selector(menuAppearance(_:)))
+            choice.representedObject = value
+            choice.state = current == value ? .on : .off
+            choices.addItem(choice)
+        }
+        appearance.submenu = choices
+        menu.addItem(appearance)
         if canQuitFreely {
             menu.addItem(.separator())
             menu.addItem(item("Quit (test mode)", #selector(menuQuit), key: "q"))
@@ -321,11 +382,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private func headerText() -> String {
         if model.lock.isLocked {
             if !model.lock.overdue.isEmpty { return "Locked: \(model.lock.overdue.count) overdue" }
-            if let end = model.lock.penaltyEndsAt { return "Late fee: unlocks at \(Fmt.time.string(from: end))" }
+            if let end = model.lock.penaltyEndsAt { return "Late penalty: unlocks at \(Fmt.time.string(from: end))" }
         }
-        if let until = model.lock.overrideUntil { return "Guardian unlock until \(Fmt.time.string(from: until))" }
-        if let next = model.nextDue { return "Next: \(next.title), \(Fmt.due(next, now: model.now))" }
-        return "Nothing owed"
+        if let until = model.lock.overrideUntil { return "Unlocked by your guardian until \(Fmt.time.string(from: until))" }
+        if let next = model.nextDue { return "Next: \(Agenda.courseAndTitle(next).title), due \(Fmt.relative(next.dueDate, now: model.now))" }
+        return "Nothing due"
     }
 
     private func item(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
@@ -348,6 +409,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             showMain()
             router.mainSheet = .guardian
         }
+    }
+    @objc private func menuBlackbaud() {
+        showMain()
+        router.mainSheet = .blackbaud
+    }
+    @objc private func menuLog() {
+        showMain()
+        router.mainSheet = .log
+    }
+    @objc private func menuAppearance(_ sender: NSMenuItem) {
+        guard let value = sender.representedObject as? String else { return }
+        model.setAppearance(value)
     }
     @objc private func menuQuit() { NSApp.terminate(nil) }
 

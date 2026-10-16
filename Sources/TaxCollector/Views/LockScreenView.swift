@@ -1,6 +1,7 @@
 import SwiftUI
 import TaxCore
 
+/// Shown while the Mac is locked: what's overdue, how to unlock it, and what got closed.
 struct LockScreenView: View {
     @Environment(AppModel.self) private var model
     @Environment(Router.self) private var router
@@ -8,153 +9,141 @@ struct LockScreenView: View {
     var body: some View {
         @Bindable var router = router
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    StampLabel(text: model.lock.isLocked ? "LOCKED" : "PAID UP", color: model.lock.isLocked ? Theme.stamp : Theme.paid)
-                    if model.dryRun { StampLabel(text: "DRY RUN · NOTHING IS CLOSED", color: Theme.amber) }
+            header
+                .padding(.horizontal, 24)
+                .padding(.top, 22)
+                .padding(.bottom, 16)
+            List {
+                if !model.lock.overdue.isEmpty {
+                    Section("Overdue") {
+                        ForEach(model.lock.overdue) { OverdueRow(task: $0) }
+                    }
                 }
-                Text(headline)
-                    .font(Theme.title(32))
-                    .foregroundStyle(Theme.ink)
-                Text(subhead).foregroundStyle(Theme.inkSoft)
-            }
-            .padding(28)
-
-            Rectangle().fill(Theme.rule).frame(height: 1)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    if !model.lock.overdue.isEmpty {
-                        section("Overdue") {
-                            ForEach(model.lock.overdue) { task in debtRow(task) }
-                        }
+                if !model.lock.penalties.isEmpty {
+                    Section("Late Penalty") {
+                        ForEach(model.lock.penalties) { PenaltyRow(task: $0) }
                     }
-                    if !model.lock.penalties.isEmpty {
-                        section("Late fee") {
-                            ForEach(model.lock.penalties) { task in penaltyRow(task) }
-                        }
-                    }
+                }
+                Section {
                     if !model.closedApps.isEmpty {
-                        section(model.dryRun ? "Would have closed" : "Closed so far") {
-                            Text(model.closedApps.joined(separator: ", "))
-                                .font(.callout)
-                                .foregroundStyle(Theme.ink)
-                        }
+                        LabeledContent(model.dryRun ? "Would have closed" : "Closed",
+                                       value: model.closedApps.joined(separator: ", "))
                     }
-                    section("Still open to you") {
-                        Text(Allowlist.apps.map(\.name).joined(separator: ", ")
-                             + (model.settings.extraAllowedBundleIDs.isEmpty ? "" : ", plus \(model.settings.extraAllowedBundleIDs.count) your guardian added"))
-                            .font(.callout)
-                            .foregroundStyle(Theme.inkSoft)
-                    }
+                    LabeledContent("Still allowed", value: allowedApps)
                 }
-                .padding(28)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .font(.callout)
             }
-
-            Rectangle().fill(Theme.rule).frame(height: 1)
+            .listStyle(.inset)
+            Divider()
             HStack {
-                Text("Can't get out? Only your guardian's code can override this.")
-                    .font(.caption).foregroundStyle(Theme.inkSoft)
+                if model.dryRun {
+                    Label("Test mode: nothing is actually closed.", systemImage: "testtube.2")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button("Guardian…") { router.lockSheet = .guardian }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
         }
-        .frame(minWidth: 620, minHeight: 520)
-        .background(Theme.paper)
+        .frame(minWidth: 560, minHeight: 440)
         .sheet(item: $router.lockSheet) { sheet in
             SheetContent(sheet: sheet, dismiss: { router.lockSheet = nil }, present: { router.lockSheet = $0 })
         }
     }
 
-    private var headline: String {
-        if !model.lock.isLocked { return "You're paid up." }
-        if !model.lock.overdue.isEmpty { return "Payment is overdue." }
-        return "Late fee in progress."
+    private var header: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 30))
+                .foregroundStyle(.red)
+                .frame(width: 36)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(model.lock.isLocked ? "This Mac is locked" : "Unlocked")
+                    .font(.title2.bold())
+                Text(explanation)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
-    private var subhead: String {
-        if !model.lock.isLocked { return "Everything is unlocked again. You can close this window." }
+    private var explanation: String {
+        if !model.lock.isLocked { return "Everything is open again. You can close this window." }
         if !model.lock.overdue.isEmpty {
-            return "Every app outside your allowed list gets closed until you prove these are done."
+            let count = model.lock.overdue.count
+            return "\(count == 1 ? "A task is" : "\(count) tasks are") overdue. Apps other than the ones allowed below will keep closing until you submit proof."
         }
         if let end = model.lock.penaltyEndsAt {
-            return "Proof accepted, but it was late. Unlocks in \(Fmt.span(end.timeIntervalSince(model.now))), at \(Fmt.time.string(from: end))."
+            return "Your proof was accepted, but it was late. The Mac unlocks at \(Fmt.time.string(from: end))."
         }
         return ""
     }
 
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title.uppercased())
-                .font(.system(size: 11, weight: .semibold))
-                .tracking(1)
-                .foregroundStyle(Theme.inkSoft)
-            content()
-        }
+    private var allowedApps: String {
+        var names = Allowlist.apps.map(\.name)
+        let extra = model.settings.extraAllowedBundleIDs.count
+        if extra > 0 { names.append("\(extra) more added by your guardian") }
+        return names.joined(separator: ", ")
     }
+}
 
-    private func debtRow(_ task: TaxTask) -> some View {
+private struct OverdueRow: View {
+    @Environment(AppModel.self) private var model
+    @Environment(Router.self) private var router
+    let task: TaxTask
+
+    var body: some View {
         let parts = Agenda.courseAndTitle(task)
         let latest = task.proofs.last
         let isChecking = latest.map { model.checking.contains($0.id) } ?? false
-        return HStack(alignment: .top, spacing: 0) {
-            Rectangle()
-                .fill(parts.course.map(Theme.courseColor) ?? Theme.stamp)
-                .frame(width: 4)
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    if let course = parts.course { CourseTag(course: course) }
-                    Text(parts.title)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Theme.ink)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if !task.details.isEmpty {
-                        Text(task.details)
-                            .font(.callout)
-                            .foregroundStyle(Theme.inkSoft)
-                            .lineLimit(3)
-                    }
-                    Text("Was due \(Fmt.dateTime.string(from: task.dueDate)) · \(Fmt.due(task, now: model.now))")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(Theme.stamp)
-                    if let latest, latest.verdict == .rejected {
-                        Text("Last proof rejected: \(latest.reason)").font(.caption).foregroundStyle(Theme.stamp)
-                    }
+        HStack(alignment: .top, spacing: 10) {
+            Circle()
+                .fill(Theme.courseColor(for: task) ?? Color.secondary.opacity(0.35))
+                .frame(width: 9, height: 9)
+                .padding(.top, 5)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(parts.title).fontWeight(.medium)
+                if let course = parts.course {
+                    Text(course).font(.caption).foregroundStyle(.secondary)
                 }
-                Spacer()
-                if isChecking {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Button("Pay with proof…") { router.lockSheet = .proof(task.id) }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.stamp)
+                Text("Was due \(Fmt.dateTime.string(from: task.dueDate)) (\(Fmt.relative(task.dueDate, now: model.now)))")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.red)
+                if let latest, latest.verdict == .rejected {
+                    Text("Last proof wasn't accepted: \(latest.reason)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
             }
-            .padding(14)
+            Spacer()
+            if isChecking {
+                ProgressView().controlSize(.small)
+            } else {
+                Button("Submit Proof…") { router.lockSheet = .proof(task.id) }
+                    .buttonStyle(.borderedProminent)
+            }
         }
-        .background(Theme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.rule, lineWidth: 1))
+        .padding(.vertical, 4)
     }
+}
 
-    private func penaltyRow(_ task: TaxTask) -> some View {
+private struct PenaltyRow: View {
+    @Environment(AppModel.self) private var model
+    let task: TaxTask
+
+    var body: some View {
         HStack {
             Text(Agenda.courseAndTitle(task).title)
-                .font(.callout)
-                .foregroundStyle(Theme.ink)
             Spacer()
             if case let .provenLate(_, end) = task.status {
-                Text(Fmt.span(end.timeIntervalSince(model.now)))
-                    .font(.system(.title3, design: .monospaced))
-                    .foregroundStyle(Theme.stamp)
+                Text("\(Fmt.span(end.timeIntervalSince(model.now))) left")
+                    .font(.body.monospacedDigit())
+                    .foregroundStyle(.red)
             }
         }
-        .padding(14)
-        .background(Theme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.rule, lineWidth: 1))
+        .padding(.vertical, 2)
     }
 }

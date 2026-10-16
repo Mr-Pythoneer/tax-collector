@@ -1,5 +1,5 @@
-// Renders Resources/AppIcon.icns: a columns building on ledger paper with a red stamp border.
-// Run: swift scripts/make-icon.swift
+// Renders Resources/AppIcon.icns: a white columns building on a green rounded square,
+// sized and inset like other Mac app icons. Run: swift scripts/make-icon.swift
 import AppKit
 
 func render(_ px: Int) -> Data {
@@ -9,25 +9,41 @@ func render(_ px: Int) -> Data {
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
     let s = CGFloat(px)
-    let inset = s * 0.09
+
+    // Mac icons leave a margin around the tile (824 of 1024) for the shadow.
+    let inset = s * 100 / 1024
     let tile = NSRect(x: inset, y: inset, width: s - inset * 2, height: s - inset * 2)
-    let paper = NSColor(red: 0.96, green: 0.94, blue: 0.89, alpha: 1)
-    let red = NSColor(red: 0.70, green: 0.15, blue: 0.12, alpha: 1)
-    let ink = NSColor(red: 0.13, green: 0.16, blue: 0.21, alpha: 1)
+    let shape = NSBezierPath(roundedRect: tile, xRadius: tile.width * 0.225, yRadius: tile.width * 0.225)
 
-    paper.setFill()
-    NSBezierPath(roundedRect: tile, xRadius: s * 0.18, yRadius: s * 0.18).fill()
-    red.setStroke()
-    let border = NSBezierPath(roundedRect: tile.insetBy(dx: s * 0.06, dy: s * 0.06), xRadius: s * 0.11, yRadius: s * 0.11)
-    border.lineWidth = s * 0.03
-    border.stroke()
+    NSGraphicsContext.saveGraphicsState()
+    let drop = NSShadow()
+    drop.shadowColor = NSColor.black.withAlphaComponent(0.28)
+    drop.shadowBlurRadius = s * 0.018
+    drop.shadowOffset = NSSize(width: 0, height: -s * 0.008)
+    drop.set()
+    NSColor(srgbRed: 0.16, green: 0.45, blue: 0.29, alpha: 1).setFill()
+    shape.fill()
+    NSGraphicsContext.restoreGraphicsState()
 
-    let config = NSImage.SymbolConfiguration(pointSize: s * 0.42, weight: .semibold)
-        .applying(.init(paletteColors: [ink]))
+    // Lighter at the top, like light falling on it.
+    NSGradient(starting: NSColor(srgbRed: 0.24, green: 0.60, blue: 0.39, alpha: 1),
+               ending: NSColor(srgbRed: 0.12, green: 0.38, blue: 0.24, alpha: 1))?
+        .draw(in: shape, angle: -90)
+
+    let config = NSImage.SymbolConfiguration(pointSize: s * 0.40, weight: .medium)
+        .applying(.init(paletteColors: [.white]))
     if let symbol = NSImage(systemSymbolName: "building.columns.fill", accessibilityDescription: nil)?
         .withSymbolConfiguration(config) {
         let size = symbol.size
-        symbol.draw(in: NSRect(x: (s - size.width) / 2, y: (s - size.height) / 2, width: size.width, height: size.height))
+        NSGraphicsContext.saveGraphicsState()
+        let lift = NSShadow()
+        lift.shadowColor = NSColor.black.withAlphaComponent(0.22)
+        lift.shadowBlurRadius = s * 0.012
+        lift.shadowOffset = NSSize(width: 0, height: -s * 0.006)
+        lift.set()
+        symbol.draw(in: NSRect(x: (s - size.width) / 2, y: (s - size.height) / 2 + s * 0.01,
+                               width: size.width, height: size.height))
+        NSGraphicsContext.restoreGraphicsState()
     }
     NSGraphicsContext.restoreGraphicsState()
     return rep.representation(using: .png, properties: [:])!

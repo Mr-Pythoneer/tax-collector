@@ -64,12 +64,12 @@ public enum Auditor {
     public static func parse(cliOutput: Data) -> AuditResult {
         guard let obj = try? JSONSerialization.jsonObject(with: cliOutput) as? [String: Any] else {
             let raw = String(decoding: cliOutput.prefix(300), as: UTF8.self)
-            return AuditResult(.error, raw.isEmpty ? "The auditor didn't answer." : "The auditor gave an unreadable answer: \(raw)")
+            return AuditResult(.error, raw.isEmpty ? "Claude didn't answer." : "Claude's answer couldn't be read: \(raw)")
         }
         let text = obj["result"] as? String ?? ""
         if obj["is_error"] as? Bool == true {
             let detail = text.isEmpty ? (obj["subtype"] as? String ?? "unknown error") : text
-            return AuditResult(.error, "The auditor hit an error: \(detail)")
+            return AuditResult(.error, "Claude couldn't check it: \(detail)")
         }
         return parseVerdict(text)
     }
@@ -81,7 +81,7 @@ public enum Auditor {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let verdict = (obj["verdict"] as? String)?.lowercased()
         else {
-            return AuditResult(.error, "The auditor's answer had no verdict: \(text.prefix(200))")
+            return AuditResult(.error, "Claude's answer had no verdict: \(text.prefix(200))")
         }
         let reason = (obj["reason"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let checklist = Array((obj["checklist"] as? [Any] ?? [])
@@ -91,7 +91,7 @@ public enum Auditor {
         switch verdict {
         case "accept", "accepted": return AuditResult(.accepted, reason, checklist: checklist)
         case "reject", "rejected": return AuditResult(.rejected, reason, checklist: checklist)
-        default: return AuditResult(.error, "The auditor gave an unknown verdict: \(verdict)")
+        default: return AuditResult(.error, "Claude gave an unknown verdict: \(verdict)")
         }
     }
 

@@ -14,9 +14,9 @@ struct ProofSubmitView: View {
     @State private var snapping = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             if let task = model.task(taskID) {
-                bill(task)
+                summary(task)
                 if let sentID, let proof = task.proofs.first(where: { $0.id == sentID }) {
                     result(proof, task: task)
                 } else {
@@ -28,50 +28,61 @@ struct ProofSubmitView: View {
             }
         }
         .padding(20)
-        .frame(width: 520)
+        .frame(width: 540)
     }
 
-    private func bill(_ task: TaxTask) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Pay with proof").font(Theme.title(20))
-            Text(task.title).font(.headline)
-            if !task.details.isEmpty { Text(task.details).font(.callout).foregroundStyle(.secondary) }
-            Text("\(Fmt.dateTime.string(from: task.dueDate)) · \(Fmt.due(task, now: model.now))")
+    private func summary(_ task: TaxTask) -> some View {
+        let parts = Agenda.courseAndTitle(task)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("Submit Proof").font(.title2.bold())
+            Text(parts.title).font(.headline)
+            if parts.course != nil { CourseLabel(task) }
+            if !task.details.isEmpty {
+                Text(task.details)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(4)
+            }
+            Text("Due \(Fmt.dateTime.string(from: task.dueDate)) (\(Fmt.relative(task.dueDate, now: model.now)))")
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(task.dueDate <= model.now ? Theme.stamp : .secondary)
+                .foregroundStyle(task.dueDate <= model.now ? Color.red : Color.secondary)
         }
     }
 
     private var form: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("What did you do?").font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("What did you do? (optional)").font(.callout)
                 TextEditor(text: $note)
                     .font(.body)
-                    .frame(height: 60)
-                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(.quaternary))
+                    .frame(height: 56)
+                    .scrollContentBackground(.hidden)
+                    .padding(4)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor)))
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Evidence: screenshots, photos, PDFs or text files. For Word or PowerPoint work, export a PDF or take a screenshot.")
+                Text("Proof").font(.callout)
+                dropZone
+                HStack {
+                    Button("Add Files…", action: choose)
+                    Button(snapping ? "Drag to select an area…" : "Take Screenshot", action: snap)
+                        .disabled(snapping)
+                    Spacer()
+                }
+                Text("Screenshots, photos, PDFs or text files. For Word or PowerPoint work, export a PDF or take a screenshot.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                dropZone
-                HStack {
-                    Button("Choose files…", action: choose)
-                    Button(snapping ? "Select an area…" : "Snap screenshot", action: snap)
-                        .disabled(snapping)
-                }
-                .controlSize(.small)
             }
 
             HStack {
-                Text("Claude checks the evidence against the task.")
+                Text("Claude compares your proof with the task.")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Cancel", action: dismiss).keyboardShortcut(.cancelAction)
-                Button("Send to the auditor", action: send)
+                Button("Submit", action: send)
                     .keyboardShortcut(.defaultAction)
                     .disabled(files.isEmpty)
             }
@@ -79,32 +90,34 @@ struct ProofSubmitView: View {
     }
 
     private var dropZone: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             if files.isEmpty {
                 Text("Drop files here")
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 60)
+                    .frame(maxWidth: .infinity, minHeight: 64)
             } else {
                 ForEach(files, id: \.self) { url in
                     HStack {
-                        Image(systemName: "doc")
+                        Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                            .resizable()
+                            .frame(width: 18, height: 18)
                         Text(url.lastPathComponent).lineLimit(1).truncationMode(.middle)
                         Spacer()
                         Button {
                             files.removeAll { $0 == url }
                         } label: {
-                            Image(systemName: "xmark.circle.fill")
+                            Image(systemName: "minus.circle")
                         }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
+                        .buttonStyle(.borderless)
+                        .help("Remove")
                     }
-                    .font(.callout)
                 }
             }
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 6).fill(dropTargeted ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.06)))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(style: StrokeStyle(lineWidth: 1, dash: [4])).foregroundStyle(.tertiary))
+        .background(RoundedRectangle(cornerRadius: 6)
+            .fill(dropTargeted ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(nsColor: .separatorColor)))
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
             for provider in providers {
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -122,15 +135,17 @@ struct ProofSubmitView: View {
             case nil:
                 HStack(spacing: 10) {
                     ProgressView().controlSize(.small)
-                    Text("The auditor is reviewing your proof. This usually takes under a minute.")
+                    Text("Claude is checking your proof. This usually takes under a minute.")
                 }
             case .accepted, .guardianApproved:
                 VStack(alignment: .leading, spacing: 6) {
-                    StampLabel(text: "PAID", color: Theme.paid)
-                    Text(proof.reason.isEmpty ? "Accepted." : proof.reason)
+                    Label("Accepted", systemImage: "checkmark.circle.fill")
+                        .font(.headline)
+                        .foregroundStyle(.green)
+                    if !proof.reason.isEmpty { Text(proof.reason) }
                     if case let .provenLate(_, end) = task.status, end > model.now {
-                        Text("It was late, so the late fee applies: locked for another \(Fmt.span(end.timeIntervalSince(model.now))).")
-                            .foregroundStyle(Theme.stamp)
+                        Text("It was late, so the Mac stays locked for another \(Fmt.span(end.timeIntervalSince(model.now))).")
+                            .foregroundStyle(.red)
                     }
                     if task.isFromBlackbaud && task.checklist != nil {
                         Divider().padding(.vertical, 4)
@@ -139,30 +154,34 @@ struct ProofSubmitView: View {
                 }
             case .rejected:
                 VStack(alignment: .leading, spacing: 6) {
-                    StampLabel(text: "REJECTED", color: Theme.stamp)
+                    Label("Not accepted", systemImage: "xmark.circle.fill")
+                        .font(.headline)
+                        .foregroundStyle(.red)
                     Text(proof.reason)
                     if let items = task.checklist, !items.isEmpty {
-                        Text("What the task asks for:").font(.caption).foregroundStyle(.secondary).padding(.top, 4)
-                        ForEach(items) { Text("• \($0.text)").font(.callout) }
+                        Text("The task asks for:").foregroundStyle(.secondary).padding(.top, 4)
+                        ForEach(items) { Text("• \($0.text)") }
                     }
-                    Text("The task is still owed. Send better evidence.").foregroundStyle(.secondary)
+                    Text("The task is still due. Try again with clearer proof.").foregroundStyle(.secondary)
                 }
             case .error:
                 VStack(alignment: .leading, spacing: 6) {
-                    StampLabel(text: "NOT CHECKED", color: Theme.amber)
+                    Label("Couldn't check it", systemImage: "exclamationmark.triangle.fill")
+                        .font(.headline)
+                        .foregroundStyle(.orange)
                     Text(proof.reason)
-                    Text("Try again, or ask your guardian to approve it by hand.").foregroundStyle(.secondary)
+                    Text("Try again, or ask your guardian to approve it.").foregroundStyle(.secondary)
                 }
             }
             HStack {
                 if proof.verdict == .rejected {
-                    Button("Send new proof") {
+                    Button("Submit New Proof") {
                         sentID = nil
                         files = []
                     }
                 }
                 if proof.verdict == .error {
-                    Button("Check again") { model.recheck(taskID: taskID, submissionID: proof.id) }
+                    Button("Try Again") { model.recheck(taskID: taskID, submissionID: proof.id) }
                 }
                 Spacer()
                 Button("Close", action: dismiss).keyboardShortcut(.defaultAction)

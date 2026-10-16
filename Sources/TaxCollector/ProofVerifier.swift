@@ -97,7 +97,7 @@ enum ProofVerifier {
         try? data.write(to: folder.appendingPathComponent("auditor.json"))
 
         if p.terminationReason == .uncaughtSignal {
-            return Outcome(verdict: .error, reason: "The auditor took longer than \(Int(timeout)) seconds and was stopped.")
+            return Outcome(verdict: .error, reason: "Claude took longer than \(Int(timeout)) seconds, so the check was stopped.")
         }
         let parsed = Auditor.parse(cliOutput: data)
         return Outcome(verdict: parsed.verdict, reason: parsed.reason, checklist: parsed.checklist)

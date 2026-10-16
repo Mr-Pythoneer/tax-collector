@@ -132,7 +132,7 @@ public struct Settings: Codable, Equatable, Sendable {
     /// When an assignment has a date but no time, it's due this many minutes after midnight on that day.
     /// Negative means the evening before.
     public var allDayDueMinutes: Int
-    /// "paper" (light, the default), "ink" (dark) or "system".
+    /// "light" (the default), "dark" or "system". Older versions saved "paper" and "ink".
     public var appearance: String
 
     public init() {
@@ -147,7 +147,7 @@ public struct Settings: Codable, Equatable, Sendable {
         blackbaudURL = nil
         blackbaudOnSince = nil
         allDayDueMinutes = Blackbaud.defaultAllDayDueMinutes
-        appearance = "paper"
+        appearance = "light"
     }
 
     // Decode field by field so adding a setting later doesn't wipe saved ones.

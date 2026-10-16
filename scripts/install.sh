@@ -1,19 +1,36 @@
 #!/bin/bash
 # Builds, installs to ~/Applications and starts Tax Collector at login via a LaunchAgent.
+#
+# For testing a throwaway copy, set TAXCOLLECTOR_LABEL and TAXCOLLECTOR_DEST. Any other TAXCOLLECTOR_*
+# variables (like TAXCOLLECTOR_DATA_DIR) are passed on to the app.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-LABEL="io.github.mrpythoneer.taxcollector"
-DEST="$HOME/Applications/Tax Collector.app"
+LABEL="${TAXCOLLECTOR_LABEL:-io.github.mrpythoneer.taxcollector}"
+DEST="${TAXCOLLECTOR_DEST:-$HOME/Applications/Tax Collector.app}"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 DOMAIN="gui/$(id -u)"
 
 ./scripts/build-app.sh
 
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
-mkdir -p "$HOME/Applications" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+mkdir -p "$(dirname "$DEST")" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
 rm -rf "$DEST"
 cp -R "build/Tax Collector.app" "$DEST"
+
+ENV_ENTRIES=""
+while IFS='=' read -r name value; do
+    case "$name" in
+        TAXCOLLECTOR_LABEL|TAXCOLLECTOR_DEST) ;;
+        TAXCOLLECTOR_*) ENV_ENTRIES+="        <key>$name</key><string>$value</string>"$'\n' ;;
+    esac
+done < <(env)
+ENV_BLOCK=""
+if [ -n "$ENV_ENTRIES" ]; then
+    ENV_BLOCK="    <key>EnvironmentVariables</key>
+    <dict>
+$ENV_ENTRIES    </dict>"
+fi
 
 cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -26,6 +43,7 @@ cat > "$PLIST" <<PLIST
         <string>$DEST/Contents/MacOS/TaxCollector</string>
         <string>--launchd</string>
     </array>
+$ENV_BLOCK
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
     <key>ThrottleInterval</key><integer>2</integer>
@@ -36,6 +54,7 @@ cat > "$PLIST" <<PLIST
 </dict>
 </plist>
 PLIST
+plutil -lint -s "$PLIST"
 
 launchctl bootstrap "$DOMAIN" "$PLIST"
 echo "Installed to $DEST and started. It will start at every login."

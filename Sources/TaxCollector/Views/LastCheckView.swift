@@ -2,7 +2,7 @@ import SwiftUI
 import TaxCore
 
 /// After proof is accepted: tick off everything the assignment asked for, then Tax Collector
-/// marks it Completed in Blackbaud for you.
+/// marks it complete in Blackbaud for you.
 struct LastCheckPanel: View {
     @Environment(AppModel.self) private var model
     let taskID: UUID
@@ -20,25 +20,25 @@ struct LastCheckPanel: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Last check").font(.headline)
             Text(task.lastCheckDoneAt == nil
-                 ? "Tick off everything the assignment asked for. Then Tax Collector marks it Completed in Blackbaud."
+                 ? "Tick everything the assignment asked for. Then Tax Collector marks it complete in Blackbaud."
                  : "You confirmed all of this \(Fmt.dateTime.string(from: task.lastCheckDoneAt!)).")
-                .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(items) { item in
-                    Toggle(isOn: Binding(get: { item.done },
-                                         set: { model.setChecklistItem(taskID, item: item.id, done: $0) })) {
-                        Text(item.text).fixedSize(horizontal: false, vertical: true)
+            GroupBox {
+                VStack(alignment: .leading, spacing: 7) {
+                    ForEach(items) { item in
+                        Toggle(isOn: Binding(get: { item.done },
+                                             set: { model.setChecklistItem(taskID, item: item.id, done: $0) })) {
+                            Text(item.text).fixedSize(horizontal: false, vertical: true)
+                        }
+                        .toggleStyle(.checkbox)
+                        .disabled(task.lastCheckDoneAt != nil)
                     }
-                    .toggleStyle(.checkbox)
-                    .disabled(task.lastCheckDoneAt != nil)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(4)
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.06)))
 
             if task.lastCheckDoneAt == nil {
                 HStack {
@@ -61,25 +61,21 @@ struct LastCheckPanel: View {
         case .working:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("Marking it Completed in Blackbaud…")
+                Text("Marking it complete in Blackbaud…")
             }
-            .font(.callout)
         case let .done(at):
-            HStack(spacing: 8) {
-                StampLabel(text: "DONE IN BLACKBAUD", color: Theme.paid)
-                Text("Marked Completed \(Fmt.time.string(from: at)).").font(.callout)
-            }
+            Label("Marked complete in Blackbaud at \(Fmt.time.string(from: at)).", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
         case let .failed(reason):
             VStack(alignment: .leading, spacing: 6) {
-                Text("Couldn't mark it in Blackbaud: \(reason)")
-                    .font(.callout)
-                    .foregroundStyle(Theme.stamp)
+                Label("Couldn't mark it complete in Blackbaud: \(reason)", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack {
                     if !model.blackbaudSignedIn {
-                        Button("Sign in to Blackbaud…") { model.onBlackbaudSignIn() }
+                        Button("Sign In to Blackbaud…") { model.onBlackbaudSignIn() }
                     }
-                    Button("Try again") { model.markInBlackbaud(taskID) }
+                    Button("Try Again") { model.markInBlackbaud(taskID) }
                 }
                 .controlSize(.small)
             }
@@ -97,11 +93,10 @@ struct LastCheckView: View {
             if let task = model.task(taskID) {
                 let parts = Agenda.courseAndTitle(task)
                 VStack(alignment: .leading, spacing: 4) {
-                    if let course = parts.course { CourseTag(course: course) }
                     Text(parts.title)
-                        .font(Theme.title(20))
-                        .foregroundStyle(Theme.ink)
+                        .font(.title2.bold())
                         .fixedSize(horizontal: false, vertical: true)
+                    if parts.course != nil { CourseLabel(task) }
                 }
                 LastCheckPanel(taskID: taskID)
             }

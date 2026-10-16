@@ -17,7 +17,7 @@ struct BlackbaudView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Blackbaud").font(Theme.title(20))
+            Text("Blackbaud").font(.title2.bold())
             if model.feedIsOn { connected } else { setup }
             Divider()
             allDaySection
@@ -49,7 +49,7 @@ struct BlackbaudView: View {
                 TextField("webcal://yourschool.myschoolapp.com/podium/feed/iCal.aspx?z=…", text: $link)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(runCheck)
-                Button("Check link", action: runCheck)
+                Button("Check Link", action: runCheck)
                     .disabled(link.trimmingCharacters(in: .whitespaces).isEmpty || checkingLink)
             }
             Text("Anyone with this link can read your Blackbaud calendar. It's saved only on this Mac.")
@@ -69,7 +69,7 @@ struct BlackbaudView: View {
         case let .bad(message):
             Text(message)
                 .font(.callout)
-                .foregroundStyle(Theme.stamp)
+                .foregroundStyle(Color.red)
                 .fixedSize(horizontal: false, vertical: true)
         case let .ok(url, upcoming, total):
             VStack(alignment: .leading, spacing: 6) {
@@ -95,7 +95,7 @@ struct BlackbaudView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Spacer()
-                    Button("Turn on import") {
+                    Button("Turn On Import") {
                         model.startFeed(url)
                         self.check = nil
                         link = ""
@@ -134,23 +134,23 @@ struct BlackbaudView: View {
             .font(.body.weight(.medium))
             Text(statusLine)
                 .font(.callout)
-                .foregroundStyle(model.feedError == nil ? Color.secondary : Theme.stamp)
+                .foregroundStyle(model.feedError == nil ? Color.secondary : Color.red)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
-                Button("Sync now") { model.syncFeed() }
+                Button("Sync Now") { model.syncFeed() }
                     .disabled(model.feedSyncing)
                 if model.feedSyncing { ProgressView().controlSize(.small) }
                 Spacer()
-                Button("Turn off import") {
+                Button("Turn Off Import") {
                     blocked = model.stopFeed() == .needsGuardian
                 }
             }
             if blocked {
                 HStack {
                     Text("Something it imported is locked in, so turning it off needs your guardian.")
-                        .foregroundStyle(Theme.stamp)
+                        .foregroundStyle(Color.red)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button("Ask guardian…", action: askGuardian)
+                    Button("Ask Your Guardian…", action: askGuardian)
                 }
                 .font(.callout)
             }
@@ -166,7 +166,7 @@ struct BlackbaudView: View {
     /// Signing in lets Tax Collector tick assignments Completed after your last check.
     private var completionSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Mark assignments Completed").font(.headline)
+            Text("Mark Assignments Complete").font(.headline)
             Text(model.blackbaudSignedIn
                  ? "Signed in. After your proof is accepted and you confirm the last check, Tax Collector marks the assignment Completed in Blackbaud."
                  : "Sign in once so Tax Collector can mark assignments Completed after your last check. You sign in on Blackbaud's own page; Tax Collector never sees your password.")
@@ -175,11 +175,11 @@ struct BlackbaudView: View {
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 if model.blackbaudSignedIn {
-                    StampLabel(text: "SIGNED IN", color: Theme.paid)
+                    Label("Signed in", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                     Spacer()
-                    Button("Sign out") { model.onBlackbaudSignOut() }
+                    Button("Sign Out") { model.onBlackbaudSignOut() }
                 } else {
-                    Button("Sign in to Blackbaud…") { model.onBlackbaudSignIn() }
+                    Button("Sign In to Blackbaud…") { model.onBlackbaudSignIn() }
                         .disabled(model.feedURL?.isFileURL ?? true)
                 }
             }

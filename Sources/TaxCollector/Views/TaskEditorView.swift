@@ -21,7 +21,7 @@ struct TaskEditorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(editing == nil ? "New task" : "Edit task").font(Theme.title(20))
+            Text(editing == nil ? "New Task" : "Edit Task").font(.title2.bold())
 
             if case .blackbaud = original?.source {
                 Label("Imported from Blackbaud. Your changes stay unless the teacher changes this assignment.",
@@ -43,7 +43,7 @@ struct TaskEditorView: View {
                 TextField("Task", text: $title, prompt: Text("Finish history essay draft"))
                     .disabled(frozen)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Details the auditor should check").font(.caption).foregroundStyle(.secondary)
+                    Text("Details (your proof is checked against these)").font(.caption).foregroundStyle(.secondary)
                     TextEditor(text: $details)
                         .font(.body)
                         .frame(height: 70)
@@ -54,12 +54,11 @@ struct TaskEditorView: View {
                     Text("Quick:").font(.caption).foregroundStyle(.secondary)
                     Button("Tonight 9 PM") { due = at(hour: 21, daysAhead: 0) }
                     Button("Tomorrow 8 AM") { due = at(hour: 8, daysAhead: 1) }
-                    Button("+1 week") { due = Calendar.current.date(byAdding: .day, value: 7, to: due) ?? due }
+                    Button("+1 Week") { due = Calendar.current.date(byAdding: .day, value: 7, to: due) ?? due }
                 }
                 .controlSize(.small)
             }
             .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
 
             if editing == nil {
                 Text(newTaskHint).font(.caption).foregroundStyle(.secondary)
@@ -68,8 +67,8 @@ struct TaskEditorView: View {
 
             if blocked {
                 HStack {
-                    Text("That change needs your guardian.").foregroundStyle(Theme.stamp)
-                    Button("Ask guardian…", action: askGuardian)
+                    Text("That change needs your guardian.").foregroundStyle(.red)
+                    Button("Ask Your Guardian…", action: askGuardian)
                 }
                 .font(.callout)
             }
@@ -77,7 +76,7 @@ struct TaskEditorView: View {
             HStack {
                 Spacer()
                 Button("Cancel", action: dismiss).keyboardShortcut(.cancelAction)
-                Button(editing == nil ? "Add to ledger" : "Save", action: save)
+                Button(editing == nil ? "Add Task" : "Save", action: save)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!canSave)
             }

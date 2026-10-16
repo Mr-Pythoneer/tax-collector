@@ -8,13 +8,13 @@ struct AuditorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Auditor").font(Theme.title(20))
+            Text("Proof Checking").font(.title2.bold())
             HStack {
                 Text("Status:")
                 Text(model.auditorStatus)
-                    .foregroundStyle(model.auditorStatus == "Ready" ? Theme.paid : Theme.stamp)
+                    .foregroundStyle(model.auditorStatus == "Ready" ? Color.green : Color.red)
                 Spacer()
-                Button("Check again") { model.refreshAuditorStatus() }.controlSize(.small)
+                Button("Check Again") { model.refreshAuditorStatus() }.controlSize(.small)
             }
             Text("Proofs are checked by the Claude command-line tool at \(model.settings.claudePath). It needs to be signed in with your Claude account. Do one of these in Terminal:")
                 .font(.callout)
@@ -30,11 +30,11 @@ struct AuditorView: View {
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 if model.hasAuditorToken {
-                    Button("Remove token", role: .destructive) { model.saveAuditorToken("") }
+                    Button("Remove Token", role: .destructive) { model.saveAuditorToken("") }
                 }
                 Spacer()
                 Button("Close", action: dismiss).keyboardShortcut(.cancelAction)
-                Button("Save token") {
+                Button("Save Token") {
                     model.saveAuditorToken(token)
                     token = ""
                 }
