@@ -39,6 +39,7 @@ final class AppModel {
     var blackbaud: BlackbaudState
     var feedSyncing = false
     var feedError: String?
+    var blackbaudSignedIn = false
 
     @ObservationIgnored let enforcer: Enforcer
     @ObservationIgnored var onLockChange: (Bool) -> Void = { _ in }
@@ -46,6 +47,11 @@ final class AppModel {
     @ObservationIgnored var onClosedApp: (String) -> Void = { _ in }
     @ObservationIgnored var onPaid: (TaxTask) -> Void = { _ in }
     @ObservationIgnored var onImported: ([TaxTask]) -> Void = { _ in }
+    /// Opens the Blackbaud sign-in window.
+    @ObservationIgnored var onBlackbaudSignIn: () -> Void = {}
+    @ObservationIgnored var onBlackbaudSignOut: () -> Void = {}
+    /// Marks an assignment Completed in Blackbaud. Returns nil on success, or why it failed.
+    @ObservationIgnored var blackbaudMarker: (TaxTask) async -> String? = { _ in "Blackbaud isn't connected." }
     @ObservationIgnored var allowQuit = false
 
     @ObservationIgnored private var timer: Timer?
@@ -254,16 +260,24 @@ final class AppModel {
             let outcome = await ProofVerifier.verify(task: t, submission: submission, folder: folder,
                                                      settings: settings, tokenFile: tokenFile)
             self.checking.remove(submissionID)
-            self.record(verdict: outcome.verdict, reason: outcome.reason, taskID: taskID, submissionID: submissionID)
+            self.record(verdict: outcome.verdict, reason: outcome.reason, checklist: outcome.checklist,
+                        taskID: taskID, submissionID: submissionID)
         }
     }
 
-    private func record(verdict: Verdict, reason: String, taskID: UUID, submissionID: UUID) {
+    private func record(verdict: Verdict, reason: String, checklist: [String] = [], taskID: UUID, submissionID: UUID) {
         guard let ti = tasks.firstIndex(where: { $0.id == taskID }),
               let si = tasks[ti].proofs.firstIndex(where: { $0.id == submissionID }) else { return }
         tasks[ti].proofs[si].verdict = verdict
         tasks[ti].proofs[si].reason = reason
         let accepted = verdict == .accepted || verdict == .guardianApproved
+        // Keep the first checklist: you may already have ticked some of it.
+        if tasks[ti].checklist == nil {
+            let items = checklist.isEmpty && accepted
+                ? Auditor.fallbackChecklist(title: tasks[ti].title, details: tasks[ti].details)
+                : checklist
+            if !items.isEmpty { tasks[ti].checklist = items.map { ChecklistItem(text: $0) } }
+        }
         if accepted && tasks[ti].isPending {
             tasks[ti].status = LockPolicy.statusAfterAccepting(
                 tasks[ti], submittedAt: tasks[ti].proofs[si].submittedAt, acceptedAt: now,
@@ -407,6 +421,55 @@ final class AppModel {
         for note in result.notes { store.log("FEED \(note)") }
         if !result.added.isEmpty { onImported(result.added) }
         tick()
+    }
+
+    // MARK: Appearance
+
+    func setAppearance(_ appearance: String) {
+        settings.appearance = appearance
+        store.saveSettings(settings)
+        Theme.apply(appearance)
+    }
+
+    // MARK: Last check
+
+    func setChecklistItem(_ taskID: UUID, item: UUID, done: Bool) {
+        guard let ti = tasks.firstIndex(where: { $0.id == taskID }),
+              tasks[ti].lastCheckDoneAt == nil,
+              let ci = tasks[ti].checklist?.firstIndex(where: { $0.id == item }) else { return }
+        tasks[ti].checklist?[ci].done = done
+        save()
+    }
+
+    /// Only after proof is accepted and every item is ticked. Then Blackbaud gets marked.
+    func confirmLastCheck(_ taskID: UUID) {
+        guard let ti = tasks.firstIndex(where: { $0.id == taskID }), tasks[ti].needsLastCheck,
+              let items = tasks[ti].checklist, !items.isEmpty, items.allSatisfy(\.done) else { return }
+        tasks[ti].lastCheckDoneAt = now
+        save()
+        store.log("LAST CHECK confirmed for \"\(tasks[ti].title)\" (\(items.count) items)")
+        markInBlackbaud(taskID)
+    }
+
+    func markInBlackbaud(_ taskID: UUID) {
+        guard let ti = tasks.firstIndex(where: { $0.id == taskID }), tasks[ti].isFromBlackbaud,
+              tasks[ti].lastCheckDoneAt != nil, tasks[ti].blackbaudMark != .working else { return }
+        if case .done = tasks[ti].blackbaudMark { return }
+        tasks[ti].blackbaudMark = .working
+        save()
+        let task = tasks[ti]
+        Task {
+            let failure = await self.blackbaudMarker(task)
+            guard let i = self.tasks.firstIndex(where: { $0.id == taskID }) else { return }
+            if let failure {
+                self.tasks[i].blackbaudMark = .failed(reason: failure)
+                self.store.log("BLACKBAUD couldn't mark \"\(task.title)\" Completed: \(failure)")
+            } else {
+                self.tasks[i].blackbaudMark = .done(at: self.now)
+                self.store.log("BLACKBAUD marked \"\(task.title)\" Completed")
+            }
+            self.save()
+        }
     }
 
     // MARK: Guardian

@@ -576,7 +576,146 @@ struct FeedPolicy {
     }
 }
 
+struct LastCheckRules {
+    func auditorChecklistParsed() {
+        let r = Auditor.parseVerdict(#"{"verdict":"accept","reason":"ok","checklist":["Answer 1-10"," ","Show work",3]}"#)
+        expect(r.checklist == ["Answer 1-10", "Show work"])
+        let many = (1...20).map { "\"item \($0)\"" }.joined(separator: ",")
+        expect(Auditor.parseVerdict("{\"verdict\":\"reject\",\"checklist\":[\(many)]}").checklist.count == Auditor.maxChecklistItems)
+        expect(Auditor.parseVerdict(#"{"verdict":"accept"}"#).checklist.isEmpty)
+    }
+
+    func fallbackUsesListLines() {
+        let details = "Read chapter 4.\n- Answer questions 1-5\n- Write a summary\n2) Upload to OneDrive"
+        expect(Auditor.fallbackChecklist(title: "HW", details: details)
+               == ["Answer questions 1-5", "Write a summary", "Upload to OneDrive"])
+        expect(Auditor.fallbackChecklist(title: "Essay draft", details: "Write the draft.") == ["Essay draft"])
+    }
+
+    func onlyPaidBlackbaudTasksNeedIt() {
+        var t = TaxTask(title: "HW", dueDate: t0, createdAt: t0, source: .blackbaud(uid: "x"))
+        expect(!t.needsLastCheck)
+        t.status = .proven(at: t0)
+        expect(t.needsLastCheck)
+        t.status = .provenLate(at: t0, penaltyEndsAt: t0)
+        expect(t.needsLastCheck)
+        t.lastCheckDoneAt = t0
+        expect(!t.needsLastCheck)
+        var manual = TaxTask(title: "HW", dueDate: t0, createdAt: t0)
+        manual.status = .proven(at: t0)
+        expect(!manual.needsLastCheck)
+    }
+
+    func oldTasksStillLoad() {
+        let json = #"[{"id":"6F1C2C3E-0000-4000-8000-000000000001","title":"Old","details":"","dueDate":"2026-10-15T23:35:15Z","createdAt":"2026-10-15T23:00:00Z","source":{"manual":{}},"status":{"pending":{}},"proofs":[]}]"#
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let tasks = try? decoder.decode([TaxTask].self, from: Data(json.utf8))
+        expect(tasks?.count == 1)
+        expect(tasks?.first?.checklist == nil)
+        expect(tasks?.first?.blackbaudMark == nil)
+    }
+}
+
+struct MatchRules {
+    let list = [
+        BlackbaudListedAssignment(indexID: 90011, assignmentID: 5501, title: "Worksheet 3.2", course: "Algebra II",
+                                  due: t0, status: -1),
+        BlackbaudListedAssignment(indexID: 90012, assignmentID: 5502, title: "Worksheet 3.3", course: "Algebra II",
+                                  due: t0.addingTimeInterval(2 * 86400), status: -1),
+        BlackbaudListedAssignment(indexID: 90013, assignmentID: 5503, title: "Essay draft", course: "English",
+                                  due: t0.addingTimeInterval(7 * 86400), status: -1),
+    ]
+
+    func idInUIDWins() {
+        expect(BlackbaudMatch.find(feedUID: "assignment-5502@school", title: "whatever", due: t0, in: list)?.indexID == 90012)
+    }
+
+    func titleAndDayMatch() {
+        // Feed title with the course glued on, deadline moved to the evening before.
+        let m = BlackbaudMatch.find(feedUID: "abc", title: "Algebra II: Worksheet 3.2!", due: t0.addingTimeInterval(-10 * 3600), in: list)
+        expect(m?.indexID == 90011)
+    }
+
+    func wrongDayOrTitleIsNoMatch() {
+        expect(BlackbaudMatch.find(feedUID: "abc", title: "Worksheet 3.2", due: t0.addingTimeInterval(5 * 86400), in: list) == nil)
+        expect(BlackbaudMatch.find(feedUID: "abc", title: "Lab report", due: t0, in: list) == nil)
+        expect(BlackbaudMatch.find(feedUID: "abc", title: "", due: t0, in: list) == nil)
+    }
+}
+
+struct FeedText {
+    func numericEntitiesDecoded() {
+        expect(Blackbaud.plainText("&#9989; To be completed : &#128187; Amplify") == "✅ To be completed : 💻 Amplify")
+        expect(Blackbaud.plainText("Playing Test No.1&#160;") == "Playing Test No.1")
+        expect(Blackbaud.plainText("caf&#xE9; &amp;#160; &lt;b&gt;") == "café &#160; <b>")
+        expect(Blackbaud.plainText("bad &#99999999; stays") == "bad &#99999999; stays")
+    }
+}
+
+struct AgendaRules {
+    var cal: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }
+
+    func task(_ title: String, due: TimeInterval, status: TaskStatus = .pending, bb: Bool = false) -> TaxTask {
+        TaxTask(title: title, dueDate: t0.addingTimeInterval(due), createdAt: t0.addingTimeInterval(-86400 * 3),
+                source: bb ? .blackbaud(uid: title) : .manual, status: status)
+    }
+
+    func groupsAndRanks() {
+        let tasks = [
+            task("later today", due: 2 * 3600),
+            task("overdue b", due: -60),
+            task("next week", due: 7 * 86400),
+            task("soon today", due: 600),
+            task("overdue a", due: -7200),
+            task("paid", due: 3600, status: .proven(at: t0)),
+            task("fee", due: -3600, status: .provenLate(at: t0, penaltyEndsAt: t0.addingTimeInterval(900))),
+        ]
+        let s = Agenda.sections(tasks, now: t0, calendar: cal)
+        expect(s.first?.kind == .lateFee)
+        expect(s[1].kind == .overdue)
+        expect(s[1].tasks.map(\.title) == ["overdue a", "overdue b"])
+        let days = s.dropFirst(2)
+        expect(days.flatMap(\.tasks).map(\.title) == ["soon today", "later today", "next week"])
+        expect(days.count >= 2)
+        expect(!s.flatMap(\.tasks).contains { $0.title == "paid" })
+        if case let .day(d) = days.first?.kind { expect(d == cal.startOfDay(for: t0.addingTimeInterval(600))) } else { expect(false) }
+    }
+
+    func blackbaudTitlesSplit() {
+        let a = Agenda.courseAndTitle(task("Mathematics 7 - MAT7 - 7B: Unit 1 Lesson 4 : Transformations", due: 0, bb: true))
+        expect(a.course == "Mathematics 7")
+        expect(a.title == "Unit 1 Lesson 4 : Transformations")
+        expect(Agenda.courseAndTitle(task("Science 7- SCI7 - 7B: Microscopy Lab", due: 0, bb: true)).course == "Science 7")
+        expect(Agenda.courseAndTitle(task("Middle School Students - 2026-27: Exploratory Form", due: 0, bb: true)).course == "Middle School Students")
+        expect(Agenda.courseAndTitle(task("Physical Education - PHE7 - 7B: Cross Country Run", due: 0, bb: true)).course == "Physical Education")
+        let manual = Agenda.courseAndTitle(task("Note: buy pens", due: 0))
+        expect(manual.course == nil && manual.title == "Note: buy pens")
+    }
+
+    func colorsAreStable() {
+        expect(Agenda.colorSlot(for: "Mathematics 7", slots: 8) == Agenda.colorSlot(for: "mathematics 7", slots: 8))
+        expect(Agenda.colorSlot(for: "Science 7", slots: 8) < 8)
+        expect(Agenda.colorSlot(for: "x", slots: 0) == 0)
+    }
+}
+
 let checks: [(String, () -> Void)] = [
+    ("AgendaRules.groupsAndRanks", { AgendaRules().groupsAndRanks() }),
+    ("AgendaRules.blackbaudTitlesSplit", { AgendaRules().blackbaudTitlesSplit() }),
+    ("AgendaRules.colorsAreStable", { AgendaRules().colorsAreStable() }),
+    ("FeedText.numericEntitiesDecoded", { FeedText().numericEntitiesDecoded() }),
+    ("MatchRules.idInUIDWins", { MatchRules().idInUIDWins() }),
+    ("MatchRules.titleAndDayMatch", { MatchRules().titleAndDayMatch() }),
+    ("MatchRules.wrongDayOrTitleIsNoMatch", { MatchRules().wrongDayOrTitleIsNoMatch() }),
+    ("LastCheckRules.auditorChecklistParsed", { LastCheckRules().auditorChecklistParsed() }),
+    ("LastCheckRules.fallbackUsesListLines", { LastCheckRules().fallbackUsesListLines() }),
+    ("LastCheckRules.onlyPaidBlackbaudTasksNeedIt", { LastCheckRules().onlyPaidBlackbaudTasksNeedIt() }),
+    ("LastCheckRules.oldTasksStillLoad", { LastCheckRules().oldTasksStillLoad() }),
     ("AuditorParsing.plainJSON", { AuditorParsing().plainJSON() }),
     ("AuditorParsing.fencedAndWrapped", { AuditorParsing().fencedAndWrapped() }),
     ("AuditorParsing.noVerdictIsError", { AuditorParsing().noVerdictIsError() }),

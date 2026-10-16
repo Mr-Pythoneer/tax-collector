@@ -6,6 +6,7 @@ import UserNotifications
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate {
     private var model: AppModel!
+    private let blackbaudLink = BlackbaudLink()
     private let router = Router()
     private var statusItem: NSStatusItem!
     private var mainWindow: NSWindow?
@@ -27,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         if !testing { enforceSingleInstance() }
 
         model = AppModel(store: Store(), dryRun: dryRun)
+        Theme.apply(model.settings.appearance)
         model.onLockChange = { [weak self] in self?.lockChanged($0) }
         model.onWarning = { [weak self] in self?.warn($0, remaining: $1) }
         model.onClosedApp = { [weak self] name in
@@ -36,6 +38,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         }
         model.onPaid = { [weak self] task in
             self?.notify("Paid: \(task.title)", "The auditor accepted your proof.")
+        }
+        blackbaudLink.configure(feedURL: model.feedURL)
+        blackbaudLink.onSignedInChange = { [weak self] in self?.model.blackbaudSignedIn = $0 }
+        model.onBlackbaudSignIn = { [weak self] in
+            guard let self else { return }
+            self.blackbaudLink.configure(feedURL: self.model.feedURL)
+            self.blackbaudLink.showSignIn()
+        }
+        model.onBlackbaudSignOut = { [weak self] in
+            guard let self else { return }
+            Task { await self.blackbaudLink.signOut() }
+        }
+        model.blackbaudMarker = { [weak self] task in
+            guard let self else { return "Tax Collector is shutting down." }
+            self.blackbaudLink.configure(feedURL: self.model.feedURL)
+            let failure = await BlackbaudAPI.markCompleted(task, link: self.blackbaudLink)
+            self.model.blackbaudSignedIn = await self.blackbaudLink.isSignedIn()
+            return failure
+        }
+        if model.feedURL != nil {
+            Task { self.model.blackbaudSignedIn = await self.blackbaudLink.isSignedIn() }
         }
         model.onImported = { [weak self] added in
             guard let self, let next = added.min(by: { $0.dueDate < $1.dueDate }) else { return }

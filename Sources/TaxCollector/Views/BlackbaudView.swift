@@ -39,7 +39,7 @@ struct BlackbaudView: View {
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 3) {
                 Text("1. Sign in at your school's myschoolapp.com site and open Assignment Center.")
-                Text("2. Switch to the calendar view and click the feed icon. It looks like the Wi-Fi symbol.")
+                Text("2. Switch to the calendar view, open the menu next to it and choose Share calendar. (Older versions have a feed icon that looks like the Wi-Fi symbol.)")
                 Text("3. Copy the link. It starts with webcal:// and has /podium/feed/iCal.aspx in it.")
             }
             .font(.callout)
@@ -154,10 +154,35 @@ struct BlackbaudView: View {
                 }
                 .font(.callout)
             }
+            Divider()
+            completionSection
             Text("Deleting an imported task follows the usual rule, and it won't be imported again. Assignments that leave the feed stay as tasks.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Signing in lets Tax Collector tick assignments Completed after your last check.
+    private var completionSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Mark assignments Completed").font(.headline)
+            Text(model.blackbaudSignedIn
+                 ? "Signed in. After your proof is accepted and you confirm the last check, Tax Collector marks the assignment Completed in Blackbaud."
+                 : "Sign in once so Tax Collector can mark assignments Completed after your last check. You sign in on Blackbaud's own page; Tax Collector never sees your password.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                if model.blackbaudSignedIn {
+                    StampLabel(text: "SIGNED IN", color: Theme.paid)
+                    Spacer()
+                    Button("Sign out") { model.onBlackbaudSignOut() }
+                } else {
+                    Button("Sign in to Blackbaud…") { model.onBlackbaudSignIn() }
+                        .disabled(model.feedURL?.isFileURL ?? true)
+                }
+            }
         }
     }
 

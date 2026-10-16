@@ -6,6 +6,7 @@ enum ProofVerifier {
     struct Outcome {
         var verdict: Verdict
         var reason: String
+        var checklist: [String] = []
     }
 
     static let timeout: TimeInterval = 180
@@ -99,7 +100,7 @@ enum ProofVerifier {
             return Outcome(verdict: .error, reason: "The auditor took longer than \(Int(timeout)) seconds and was stopped.")
         }
         let parsed = Auditor.parse(cliOutput: data)
-        return Outcome(verdict: parsed.verdict, reason: parsed.reason)
+        return Outcome(verdict: parsed.verdict, reason: parsed.reason, checklist: parsed.checklist)
     }
 
     /// launchd gives a bare environment, and Claude Code variables from a parent session would confuse the CLI.

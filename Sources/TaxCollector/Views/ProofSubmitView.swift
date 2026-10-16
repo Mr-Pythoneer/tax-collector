@@ -132,11 +132,19 @@ struct ProofSubmitView: View {
                         Text("It was late, so the late fee applies: locked for another \(Fmt.span(end.timeIntervalSince(model.now))).")
                             .foregroundStyle(Theme.stamp)
                     }
+                    if task.isFromBlackbaud && task.checklist != nil {
+                        Divider().padding(.vertical, 4)
+                        LastCheckPanel(taskID: task.id)
+                    }
                 }
             case .rejected:
                 VStack(alignment: .leading, spacing: 6) {
                     StampLabel(text: "REJECTED", color: Theme.stamp)
                     Text(proof.reason)
+                    if let items = task.checklist, !items.isEmpty {
+                        Text("What the task asks for:").font(.caption).foregroundStyle(.secondary).padding(.top, 4)
+                        ForEach(items) { Text("• \($0.text)").font(.callout) }
+                    }
                     Text("The task is still owed. Send better evidence.").foregroundStyle(.secondary)
                 }
             case .error:

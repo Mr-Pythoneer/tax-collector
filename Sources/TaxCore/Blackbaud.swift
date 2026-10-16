@@ -153,13 +153,30 @@ public enum Blackbaud {
             t = t.replacingOccurrences(of: "<[^>]*>", with: "", options: .regularExpression)
         }
         for (entity, plain) in [("&nbsp;", " "), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""),
-                                ("&#39;", "'"), ("&apos;", "'"), ("&amp;", "&")] {
+                                ("&apos;", "'")] {
             t = t.replacingOccurrences(of: entity, with: plain, options: .caseInsensitive)
         }
+        // Teachers' emoji and spaces arrive as numbers: &#9989; is ✅, &#160; a non-breaking space.
+        t = decodeNumericEntities(t)
+        t = t.replacingOccurrences(of: "&amp;", with: "&", options: .caseInsensitive)
         return t.components(separatedBy: .newlines)
-            .map { $0.split(whereSeparator: { $0 == " " || $0 == "\t" }).joined(separator: " ") }
+            .map { $0.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ") }
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
+    }
+
+    static func decodeNumericEntities(_ text: String) -> String {
+        guard text.contains("&#") else { return text }
+        let pattern = try! NSRegularExpression(pattern: "&#(x[0-9a-fA-F]{1,6}|[0-9]{1,7});")
+        var out = text
+        for match in pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
+            guard let whole = Range(match.range, in: text), let digits = Range(match.range(at: 1), in: text) else { continue }
+            let code = text[digits]
+            let value = code.hasPrefix("x") || code.hasPrefix("X") ? UInt32(code.dropFirst(), radix: 16) : UInt32(code)
+            guard let value, let scalar = Unicode.Scalar(value) else { continue }
+            out.replaceSubrange(whole, with: String(Character(scalar)))
+        }
+        return out
     }
 
     // MARK: Sync

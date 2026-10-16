@@ -90,6 +90,7 @@ private struct GuardianPanel: View {
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
         }
         .frame(width: 560, height: 620)
         .onAppear { penalty = model.settings.penaltyMinutes }

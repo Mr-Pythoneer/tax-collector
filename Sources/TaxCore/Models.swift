@@ -36,6 +36,26 @@ public struct ProofSubmission: Codable, Identifiable, Equatable, Sendable {
     public var isAccepted: Bool { verdict == .accepted || verdict == .guardianApproved }
 }
 
+/// One thing the task asks for, ticked off in the last check.
+public struct ChecklistItem: Codable, Identifiable, Equatable, Sendable {
+    public var id: UUID
+    public var text: String
+    public var done: Bool
+
+    public init(id: UUID = UUID(), text: String, done: Bool = false) {
+        self.id = id
+        self.text = text
+        self.done = done
+    }
+}
+
+/// Where marking the assignment Completed in Blackbaud stands.
+public enum BlackbaudMark: Codable, Equatable, Sendable {
+    case working
+    case done(at: Date)
+    case failed(reason: String)
+}
+
 public enum TaskStatus: Codable, Equatable, Sendable {
     case pending
     case proven(at: Date)
@@ -52,6 +72,11 @@ public struct TaxTask: Codable, Identifiable, Equatable, Sendable {
     public var source: TaskSource
     public var status: TaskStatus
     public var proofs: [ProofSubmission]
+    /// Filled in when proof is accepted. Optional so older saved tasks still load.
+    public var checklist: [ChecklistItem]?
+    /// When you confirmed every checklist item.
+    public var lastCheckDoneAt: Date?
+    public var blackbaudMark: BlackbaudMark?
 
     public init(id: UUID = UUID(), title: String, details: String = "", dueDate: Date,
                 createdAt: Date, source: TaskSource = .manual, status: TaskStatus = .pending,
@@ -67,6 +92,20 @@ public struct TaxTask: Codable, Identifiable, Equatable, Sendable {
     }
 
     public var isPending: Bool { status == .pending }
+
+    public var isFromBlackbaud: Bool {
+        if case .blackbaud = source { return true }
+        return false
+    }
+
+    /// Paid, but you haven't yet confirmed the checklist and had Blackbaud marked.
+    public var needsLastCheck: Bool {
+        guard isFromBlackbaud, lastCheckDoneAt == nil else { return false }
+        switch status {
+        case .proven, .provenLate: return true
+        case .pending, .excused: return false
+        }
+    }
 
     /// A proof sent in before the deadline that the auditor hasn't ruled on yet.
     /// While one exists the task doesn't count as overdue, so a slow check can't make you late.
@@ -93,6 +132,8 @@ public struct Settings: Codable, Equatable, Sendable {
     /// When an assignment has a date but no time, it's due this many minutes after midnight on that day.
     /// Negative means the evening before.
     public var allDayDueMinutes: Int
+    /// "paper" (light, the default), "ink" (dark) or "system".
+    public var appearance: String
 
     public init() {
         penaltyMinutes = 30
@@ -106,6 +147,7 @@ public struct Settings: Codable, Equatable, Sendable {
         blackbaudURL = nil
         blackbaudOnSince = nil
         allDayDueMinutes = Blackbaud.defaultAllDayDueMinutes
+        appearance = "paper"
     }
 
     // Decode field by field so adding a setting later doesn't wipe saved ones.
@@ -123,5 +165,6 @@ public struct Settings: Codable, Equatable, Sendable {
         blackbaudURL = try c.decodeIfPresent(String.self, forKey: .blackbaudURL)
         blackbaudOnSince = try c.decodeIfPresent(Date.self, forKey: .blackbaudOnSince)
         allDayDueMinutes = try c.decodeIfPresent(Int.self, forKey: .allDayDueMinutes) ?? allDayDueMinutes
+        appearance = try c.decodeIfPresent(String.self, forKey: .appearance) ?? appearance
     }
 }

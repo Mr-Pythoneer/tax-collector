@@ -13,12 +13,14 @@ struct LockScreenView: View {
                     StampLabel(text: model.lock.isLocked ? "LOCKED" : "PAID UP", color: model.lock.isLocked ? Theme.stamp : Theme.paid)
                     if model.dryRun { StampLabel(text: "DRY RUN · NOTHING IS CLOSED", color: Theme.amber) }
                 }
-                Text(headline).font(Theme.title(30))
-                Text(subhead).foregroundStyle(.secondary)
+                Text(headline)
+                    .font(Theme.title(32))
+                    .foregroundStyle(Theme.ink)
+                Text(subhead).foregroundStyle(Theme.inkSoft)
             }
             .padding(28)
 
-            Divider()
+            Rectangle().fill(Theme.rule).frame(height: 1)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -34,24 +36,26 @@ struct LockScreenView: View {
                     }
                     if !model.closedApps.isEmpty {
                         section(model.dryRun ? "Would have closed" : "Closed so far") {
-                            Text(model.closedApps.joined(separator: ", ")).font(.callout)
+                            Text(model.closedApps.joined(separator: ", "))
+                                .font(.callout)
+                                .foregroundStyle(Theme.ink)
                         }
                     }
                     section("Still open to you") {
                         Text(Allowlist.apps.map(\.name).joined(separator: ", ")
                              + (model.settings.extraAllowedBundleIDs.isEmpty ? "" : ", plus \(model.settings.extraAllowedBundleIDs.count) your guardian added"))
                             .font(.callout)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.inkSoft)
                     }
                 }
                 .padding(28)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Divider()
+            Rectangle().fill(Theme.rule).frame(height: 1)
             HStack {
                 Text("Can't get out? Only your guardian's code can override this.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(Theme.inkSoft)
                 Spacer()
                 Button("Guardian…") { router.lockSheet = .guardian }
             }
@@ -59,6 +63,7 @@ struct LockScreenView: View {
             .padding(.vertical, 12)
         }
         .frame(minWidth: 620, minHeight: 520)
+        .background(Theme.paper)
         .sheet(item: $router.lockSheet) { sheet in
             SheetContent(sheet: sheet, dismiss: { router.lockSheet = nil }, present: { router.lockSheet = $0 })
         }
@@ -86,44 +91,70 @@ struct LockScreenView: View {
             Text(title.uppercased())
                 .font(.system(size: 11, weight: .semibold))
                 .tracking(1)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.inkSoft)
             content()
         }
     }
 
     private func debtRow(_ task: TaxTask) -> some View {
+        let parts = Agenda.courseAndTitle(task)
         let latest = task.proofs.last
         let isChecking = latest.map { model.checking.contains($0.id) } ?? false
-        return HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(task.title).font(.title3.weight(.medium))
-                if !task.details.isEmpty { Text(task.details).font(.callout).foregroundStyle(.secondary) }
-                Text("Was due \(Fmt.dateTime.string(from: task.dueDate)) · \(Fmt.due(task, now: model.now))")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(Theme.stamp)
-                if let latest, latest.verdict == .rejected {
-                    Text("Last proof rejected: \(latest.reason)").font(.caption).foregroundStyle(Theme.stamp)
+        return HStack(alignment: .top, spacing: 0) {
+            Rectangle()
+                .fill(parts.course.map(Theme.courseColor) ?? Theme.stamp)
+                .frame(width: 4)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    if let course = parts.course { CourseTag(course: course) }
+                    Text(parts.title)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !task.details.isEmpty {
+                        Text(task.details)
+                            .font(.callout)
+                            .foregroundStyle(Theme.inkSoft)
+                            .lineLimit(3)
+                    }
+                    Text("Was due \(Fmt.dateTime.string(from: task.dueDate)) · \(Fmt.due(task, now: model.now))")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(Theme.stamp)
+                    if let latest, latest.verdict == .rejected {
+                        Text("Last proof rejected: \(latest.reason)").font(.caption).foregroundStyle(Theme.stamp)
+                    }
+                }
+                Spacer()
+                if isChecking {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button("Pay with proof…") { router.lockSheet = .proof(task.id) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.stamp)
                 }
             }
-            Spacer()
-            if isChecking {
-                ProgressView().controlSize(.small)
-            } else {
-                Button("Pay with proof…") { router.lockSheet = .proof(task.id) }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.stamp)
-            }
+            .padding(14)
         }
+        .background(Theme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.rule, lineWidth: 1))
     }
 
     private func penaltyRow(_ task: TaxTask) -> some View {
         HStack {
-            Text(task.title).font(.callout)
+            Text(Agenda.courseAndTitle(task).title)
+                .font(.callout)
+                .foregroundStyle(Theme.ink)
             Spacer()
             if case let .provenLate(_, end) = task.status {
                 Text(Fmt.span(end.timeIntervalSince(model.now)))
                     .font(.system(.title3, design: .monospaced))
+                    .foregroundStyle(Theme.stamp)
             }
         }
+        .padding(14)
+        .background(Theme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.rule, lineWidth: 1))
     }
 }

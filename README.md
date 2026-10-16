@@ -4,6 +4,18 @@ A Mac menu-bar app that holds you to your own deadlines. Add a task and a due da
 
 **Allowed during a lock:** Arc, Claude, Word, Excel, PowerPoint, Outlook, OneNote, Teams, OneDrive, Mail, Zoom, VooV Meeting, Activity Monitor (plus Finder and a few system helpers).
 
+## The planner
+
+Owed tasks are ranked by due time and grouped by day, like a paper planner:
+
+- Anything charging a late fee or overdue sits at the top in red.
+- Then comes one block per day, with the date in the left column. Today's block is amber.
+- Every task is numbered in due order. The next one due is marked **Next up** and shown a little larger.
+- Blackbaud assignments show their class as a coloured tag, and each class keeps the same colour.
+- Paid work waiting for its last check comes next. Everything settled folds away at the bottom.
+
+The default look is **Paper** (warm and light). Switch to **Ink** (dark) or **Match Mac** from the half-circle button at the bottom right.
+
 ## Rules
 
 - **Proof** is checked by the local `claude` CLI. A rejection means the task is still owed.
@@ -63,7 +75,7 @@ This is self-accountability, not parental-control software.
 
 Tax Collector can import assignments from Blackbaud (`yourschool.myschoolapp.com`) as tasks.
 
-**Get the link.** In Assignment Center, switch to the calendar view and click the feed icon (it looks like the Wi-Fi symbol). Copy the link. It starts with `webcal://` and contains `/podium/feed/iCal.aspx?z=…`. Then paste it in **Tax Collector → Blackbaud** and click **Check link**. You see what would be imported before anything is.
+**Get the link.** In Assignment Center, switch to the calendar view, open the menu next to it and choose **Share calendar**. Older versions have a feed icon that looks like the Wi-Fi symbol instead. Copy the link. It starts with `webcal://` and contains `/podium/feed/iCal.aspx?z=…`. Then paste it in **Tax Collector → Blackbaud** and click **Check link**. You see what would be imported before anything is.
 
 - Use the Assignment Center feed, not the whole calendar's. The calendar feed also has class periods and school events, and each of those would become a task.
 - The Assignment Center feed only covers the next 60 days, and Blackbaud can take up to an hour to show changes.
@@ -83,3 +95,15 @@ Tax Collector can import assignments from Blackbaud (`yourschool.myschoolapp.com
 - Turning import on makes things stricter, so it never needs the guardian code.
 - Deleting an imported task follows the usual 24-hour rule. A deleted assignment isn't imported again.
 - Turning import off follows the same rule. It's free unless something it imported is locked in (due within 24 hours, or still paying a late fee), or within 5 minutes of turning it on. Otherwise only the guardian can turn it off. Tasks it already imported stay either way.
+
+### Last check and marking Completed
+
+Blackbaud never needs anything submitted, but its Assignment Center has a To do / In progress / Completed status. Tax Collector can set it for you:
+
+1. **Sign in once.** Go to **Tax Collector → Blackbaud → Sign in to Blackbaud**. The sign-in happens on Blackbaud's own page, or your school's Google or Microsoft page, so Tax Collector never sees your password. The session stays in the app's web storage.
+2. **Pay with proof as usual.** While the auditor checks your proof, it also turns the assignment's description into a checklist of everything it asks for.
+3. **Do the last check.** Once the proof is accepted, tick every item, then press **I've done all of this**.
+4. **Tax Collector marks it Completed.** It finds the assignment in Blackbaud by course, title and due date, since the feed carries no assignment ID. It sets the status to Completed and reads it back to confirm. If that fails, the task shows the reason and a Retry button.
+
+This uses the same private web endpoints the Blackbaud student site uses (`/api/assignment2/assignmentstatusupdate` and the Assignment Center list). Blackbaud changes them now and then, so they're kept together in `Sources/TaxCollector/BlackbaudAPI.swift`.
+

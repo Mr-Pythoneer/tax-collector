@@ -59,6 +59,7 @@ struct TaskEditorView: View {
                 .controlSize(.small)
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
 
             if editing == nil {
                 Text(newTaskHint).font(.caption).foregroundStyle(.secondary)
