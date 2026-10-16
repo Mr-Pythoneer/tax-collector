@@ -19,6 +19,7 @@ public final class Store {
     private var tasksURL: URL { dir.appendingPathComponent("tasks.json") }
     private var settingsURL: URL { dir.appendingPathComponent("settings.json") }
     private var guardianURL: URL { dir.appendingPathComponent("guardian.json") }
+    private var blackbaudURL: URL { dir.appendingPathComponent("blackbaud.json") }
     public var logURL: URL { dir.appendingPathComponent("events.log") }
     public var proofsRoot: URL { dir.appendingPathComponent("proofs", isDirectory: true) }
 
@@ -30,6 +31,9 @@ public final class Store {
 
     public func loadGuardian() -> GuardianRecord? { load(GuardianRecord.self, from: guardianURL) }
     public func saveGuardian(_ record: GuardianRecord) { save(record, to: guardianURL) }
+
+    public func loadBlackbaud() -> BlackbaudState { load(BlackbaudState.self, from: blackbaudURL) ?? BlackbaudState() }
+    public func saveBlackbaud(_ state: BlackbaudState) { save(state, to: blackbaudURL) }
 
     public func proofFolder(task: UUID, submission: UUID) -> URL {
         let url = proofsRoot

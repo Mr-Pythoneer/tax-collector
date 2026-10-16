@@ -68,6 +68,17 @@ public enum LockPolicy {
         !isFrozen(task, now: now)
     }
 
+    /// Turning the Blackbaud feed off loosens the rules, so it gets the same lock-in as tasks:
+    /// free while nothing it imported is locked in, or in the first 5 minutes after turning it on.
+    /// Otherwise only the guardian can. Tasks it already imported stay either way.
+    public static func canStopFeedWithoutGuardian(onSince: Date?, tasks: [TaxTask], now: Date) -> Bool {
+        if let onSince, now.timeIntervalSince(onSince) < creationGrace { return true }
+        return !tasks.contains { task in
+            guard case .blackbaud = task.source else { return false }
+            return isFrozen(task, now: now)
+        }
+    }
+
     /// What a task becomes once its proof is accepted.
     public static func statusAfterAccepting(_ task: TaxTask, submittedAt: Date, acceptedAt: Date,
                                             penaltyMinutes: Int) -> TaskStatus {

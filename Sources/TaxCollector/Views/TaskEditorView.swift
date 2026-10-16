@@ -23,6 +23,14 @@ struct TaskEditorView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text(editing == nil ? "New task" : "Edit task").font(Theme.title(20))
 
+            if case .blackbaud = original?.source {
+                Label("Imported from Blackbaud. Your changes stay unless the teacher changes this assignment.",
+                      systemImage: "graduationcap")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if frozen {
                 Label("Less than 24 hours to go, so this task is locked in. You can only move the deadline earlier. Your guardian can change anything else.",
                       systemImage: "lock")

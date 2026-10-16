@@ -8,6 +8,7 @@ enum Sheet: Identifiable, Equatable {
     case guardian
     case log
     case auditor
+    case blackbaud
 
     var id: String {
         switch self {
@@ -17,6 +18,7 @@ enum Sheet: Identifiable, Equatable {
         case .guardian: "guardian"
         case .log: "log"
         case .auditor: "auditor"
+        case .blackbaud: "blackbaud"
         }
     }
 }
@@ -162,6 +164,9 @@ struct MainView: View {
                 .buttonStyle(.plain)
                 .font(.caption)
                 .foregroundStyle(model.auditorStatus == "Ready" ? Theme.paid : Theme.stamp)
+            Button("Blackbaud") { router.mainSheet = .blackbaud }
+                .foregroundStyle(model.feedError == nil ? Color.primary : Theme.stamp)
+                .help(model.feedError ?? (model.feedIsOn ? "Importing assignments from Blackbaud" : "Import assignments from Blackbaud"))
             Button("Log") { router.mainSheet = .log }
             Button("Guardian…") { router.mainSheet = .guardian }
         }
@@ -181,6 +186,12 @@ struct TaskRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(task.title).font(.body.weight(.medium))
+                    if case .blackbaud = task.source {
+                        Image(systemName: "graduationcap")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .help("Imported from Blackbaud")
+                    }
                     if model.isFrozen(task) && task.isPending {
                         Image(systemName: "lock")
                             .font(.caption)
@@ -247,6 +258,7 @@ struct SheetContent: View {
         case .guardian: GuardianView(dismiss: dismiss)
         case .log: LogView(dismiss: dismiss)
         case .auditor: AuditorView(dismiss: dismiss)
+        case .blackbaud: BlackbaudView(dismiss: dismiss, askGuardian: { present(.guardian) })
         }
     }
 }

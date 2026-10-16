@@ -162,6 +162,13 @@ private struct GuardianPanel: View {
 
     private var rulesSection: some View {
         Section("Rules") {
+            if model.feedIsOn {
+                HStack {
+                    Text("Blackbaud import is on")
+                    Spacer()
+                    Button("Turn off") { _ = model.stopFeed(guardianApproved: true) }
+                }
+            }
             Stepper(value: $penalty, in: 0...240, step: 5) {
                 Text("Late fee: \(penalty) min locked after late proof")
             }

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Where a task came from. Manual for v1; Blackbaud iCal import later.
+/// Where a task came from: typed in, or imported from a Blackbaud iCal feed (keyed by the event's UID).
 public enum TaskSource: Codable, Equatable, Sendable {
     case manual
     case blackbaud(uid: String)
@@ -86,6 +86,13 @@ public struct Settings: Codable, Equatable, Sendable {
     public var lastSeen: Date?
     public var guardianFailures: Int
     public var guardianLockedUntil: Date?
+    /// The Blackbaud feed link. nil means import is off.
+    public var blackbaudURL: String?
+    /// When import was turned on, for the 5-minute grace to undo a mistake.
+    public var blackbaudOnSince: Date?
+    /// When an assignment has a date but no time, it's due this many minutes after midnight on that day.
+    /// Negative means the evening before.
+    public var allDayDueMinutes: Int
 
     public init() {
         penaltyMinutes = 30
@@ -96,6 +103,9 @@ public struct Settings: Codable, Equatable, Sendable {
         lastSeen = nil
         guardianFailures = 0
         guardianLockedUntil = nil
+        blackbaudURL = nil
+        blackbaudOnSince = nil
+        allDayDueMinutes = Blackbaud.defaultAllDayDueMinutes
     }
 
     // Decode field by field so adding a setting later doesn't wipe saved ones.
@@ -110,5 +120,8 @@ public struct Settings: Codable, Equatable, Sendable {
         lastSeen = try c.decodeIfPresent(Date.self, forKey: .lastSeen)
         guardianFailures = try c.decodeIfPresent(Int.self, forKey: .guardianFailures) ?? 0
         guardianLockedUntil = try c.decodeIfPresent(Date.self, forKey: .guardianLockedUntil)
+        blackbaudURL = try c.decodeIfPresent(String.self, forKey: .blackbaudURL)
+        blackbaudOnSince = try c.decodeIfPresent(Date.self, forKey: .blackbaudOnSince)
+        allDayDueMinutes = try c.decodeIfPresent(Int.self, forKey: .allDayDueMinutes) ?? allDayDueMinutes
     }
 }

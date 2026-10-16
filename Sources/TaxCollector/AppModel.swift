@@ -13,6 +13,12 @@ enum EditResult {
     case needsGuardian
 }
 
+/// What checking a pasted feed link found, before anything is imported.
+enum FeedCheck {
+    case ok(url: URL, upcoming: [BlackbaudAssignment], total: Int)
+    case bad(String)
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -30,12 +36,16 @@ final class AppModel {
     var closedApps: [String] = []
     var checking: Set<UUID> = []
     var auditorStatus = "Checking…"
+    var blackbaud: BlackbaudState
+    var feedSyncing = false
+    var feedError: String?
 
     @ObservationIgnored let enforcer: Enforcer
     @ObservationIgnored var onLockChange: (Bool) -> Void = { _ in }
     @ObservationIgnored var onWarning: (TaxTask, TimeInterval) -> Void = { _, _ in }
     @ObservationIgnored var onClosedApp: (String) -> Void = { _ in }
     @ObservationIgnored var onPaid: (TaxTask) -> Void = { _ in }
+    @ObservationIgnored var onImported: ([TaxTask]) -> Void = { _ in }
     @ObservationIgnored var allowQuit = false
 
     @ObservationIgnored private var timer: Timer?
@@ -43,6 +53,7 @@ final class AppModel {
     @ObservationIgnored private var lastClockSave = Date.distantPast
     @ObservationIgnored private var lastUptime = ProcessInfo.processInfo.systemUptime
     @ObservationIgnored private var wasLocked = false
+    @ObservationIgnored private var lastFeedAttempt: Date?
 
     var tokenFile: URL { store.dir.appendingPathComponent("claude-token") }
     var selfBundleID: String? { Bundle.main.bundleIdentifier }
@@ -53,6 +64,7 @@ final class AppModel {
         tasks = store.loadTasks()
         settings = store.loadSettings()
         guardian = store.loadGuardian()
+        blackbaud = store.loadBlackbaud()
         enforcer = Enforcer(dryRun: dryRun)
         now = LockPolicy.effectiveNow(systemNow: Date(), lastSeen: settings.lastSeen)
 
@@ -111,6 +123,7 @@ final class AppModel {
             lockChanged()
         }
         checkWarnings()
+        pollFeedIfDue()
     }
 
     private func lockChanged() {
@@ -188,6 +201,10 @@ final class AppModel {
         if !guardianApproved && !LockPolicy.canDeleteWithoutGuardian(t, now: now) { return .needsGuardian }
         tasks.removeAll { $0.id == id }
         try? FileManager.default.removeItem(at: store.proofsRoot.appendingPathComponent(id.uuidString))
+        if case let .blackbaud(uid) = t.source {
+            blackbaud.dismiss(uid: uid)
+            store.saveBlackbaud(blackbaud)
+        }
         save()
         store.log("TASK deleted \"\(t.title)\"\(guardianApproved ? " (guardian)" : "")")
         tick()
@@ -284,6 +301,113 @@ final class AppModel {
     }
 
     var hasAuditorToken: Bool { FileManager.default.fileExists(atPath: tokenFile.path) }
+
+    // MARK: Blackbaud
+
+    var feedURL: URL? { settings.blackbaudURL.flatMap(Blackbaud.feedURL(from:)) }
+    var feedIsOn: Bool { settings.blackbaudURL != nil }
+    var importedCount: Int {
+        tasks.filter { if case .blackbaud = $0.source { true } else { false } }.count
+    }
+    var canStopFeedFreely: Bool {
+        LockPolicy.canStopFeedWithoutGuardian(onSince: settings.blackbaudOnSince, tasks: tasks, now: now)
+    }
+
+    /// Fetches a pasted link and shows what it would import, without importing anything.
+    func checkFeed(_ raw: String) async -> FeedCheck {
+        guard let url = Blackbaud.feedURL(from: raw) else {
+            return .bad("That doesn't look like a feed link. It should start with webcal:// or https://.")
+        }
+        switch await FeedFetcher.fetch(url) {
+        case let .failed(message):
+            return .bad(message)
+        case let .events(events):
+            let items = Blackbaud.assignments(from: events, allDayDueMinutes: settings.allDayDueMinutes)
+            let known = Set(tasks.compactMap { task -> String? in
+                if case let .blackbaud(uid) = task.source { return uid }
+                return nil
+            }).union(blackbaud.dismissed)
+            let upcoming = items.filter { $0.dueDate > now && !known.contains($0.uid) }.sorted { $0.dueDate < $1.dueDate }
+            return .ok(url: url, upcoming: upcoming, total: events.count)
+        }
+    }
+
+    /// Makes things stricter, so it never needs the guardian.
+    func startFeed(_ url: URL) {
+        settings.blackbaudURL = url.absoluteString
+        settings.blackbaudOnSince = now
+        store.saveSettings(settings)
+        store.log("FEED on: \(Blackbaud.redacted(url))")
+        feedError = nil
+        lastFeedAttempt = nil
+        syncFeed()
+    }
+
+    func stopFeed(guardianApproved: Bool = false) -> EditResult {
+        guard feedIsOn else { return .saved }
+        if !guardianApproved && !canStopFeedFreely { return .needsGuardian }
+        let shown = feedURL.map(Blackbaud.redacted) ?? "feed"
+        settings.blackbaudURL = nil
+        settings.blackbaudOnSince = nil
+        store.saveSettings(settings)
+        feedError = nil
+        store.log("FEED off: \(shown)\(guardianApproved ? " (guardian)" : ""). Imported tasks stay.")
+        return .saved
+    }
+
+    /// No guardian needed: earlier is stricter, and a later time only moves tasks that aren't locked in.
+    func setAllDayDue(minutes: Int) {
+        guard minutes != settings.allDayDueMinutes else { return }
+        settings.allDayDueMinutes = minutes
+        store.saveSettings(settings)
+        store.log("FEED all-day assignments now due \(minutes) min after midnight on their date")
+        lastFeedAttempt = nil
+    }
+
+    func syncFeed() {
+        guard let url = feedURL, !feedSyncing else {
+            if feedIsOn && feedURL == nil { feedError = "The saved feed link can't be read. Turn import off and add it again." }
+            return
+        }
+        feedSyncing = true
+        lastFeedAttempt = Date()
+        Task {
+            let outcome = await FeedFetcher.fetch(url)
+            self.feedSyncing = false
+            // Import may have been turned off, or pointed somewhere else, while this was in flight.
+            guard self.feedURL == url else { return }
+            switch outcome {
+            case let .events(events):
+                self.importFeed(events)
+            case let .failed(message):
+                if self.feedError != message { self.store.log("FEED failed (\(Blackbaud.redacted(url))): \(message)") }
+                self.feedError = message
+            }
+        }
+    }
+
+    private func pollFeedIfDue() {
+        guard feedURL != nil, !feedSyncing else { return }
+        let wait = feedError == nil ? Blackbaud.pollInterval : Blackbaud.retryInterval
+        // abs(): a clock wound back shouldn't stop the polling.
+        if let last = lastFeedAttempt, abs(Date().timeIntervalSince(last)) < wait { return }
+        syncFeed()
+    }
+
+    private func importFeed(_ events: [ICalEvent]) {
+        let items = Blackbaud.assignments(from: events, allDayDueMinutes: settings.allDayDueMinutes)
+        let result = Blackbaud.sync(tasks: tasks, state: blackbaud, assignments: items, now: now)
+        tasks = result.tasks
+        blackbaud = result.state
+        blackbaud.lastSync = now
+        feedError = nil
+        save()
+        store.saveBlackbaud(blackbaud)
+        for t in result.added { store.log("FEED imported \"\(t.title)\" due \(t.dueDate)") }
+        for note in result.notes { store.log("FEED \(note)") }
+        if !result.added.isEmpty { onImported(result.added) }
+        tick()
+    }
 
     // MARK: Guardian
 

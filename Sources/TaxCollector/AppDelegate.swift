@@ -37,6 +37,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         model.onPaid = { [weak self] task in
             self?.notify("Paid: \(task.title)", "The auditor accepted your proof.")
         }
+        model.onImported = { [weak self] added in
+            guard let self, let next = added.min(by: { $0.dueDate < $1.dueDate }) else { return }
+            let title = added.count == 1 ? "New from Blackbaud: \(next.title)" : "\(added.count) assignments from Blackbaud"
+            var body = "Next: \(next.title), \(Fmt.due(next, now: self.model.now))."
+            if next.dueDate.timeIntervalSince(self.model.now) <= LockPolicy.freezeWindow {
+                body += " Due within a day, so it locks in after 5 minutes."
+            }
+            self.notify(title, body)
+        }
 
         setUpStatusItem()
         setUpNotifications()
