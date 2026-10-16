@@ -41,6 +41,18 @@ public struct BlackbaudState: Codable, Equatable, Sendable {
         lastSync = try c.decodeIfPresent(Date.self, forKey: .lastSync)
     }
 
+    /// When Blackbaud itself has `task` due. Your guardian or an extension can move the task's deadline,
+    /// but finding the assignment in Blackbaud has to go by Blackbaud's date.
+    public func blackbaudDue(of task: TaxTask) -> Date {
+        guard case let .blackbaud(uid) = task.source else { return task.dueDate }
+        if let seen = lastSeen[uid] { return seen.dueDate }
+        let sameTitle = lastSeen.values.filter { $0.title == task.title }
+        let closest = sameTitle.min {
+            abs($0.dueDate.timeIntervalSince(task.dueDate)) < abs($1.dueDate.timeIntervalSince(task.dueDate))
+        }
+        return closest?.dueDate ?? task.dueDate
+    }
+
     public mutating func dismiss(uid: String, title: String, due: Date) {
         dismissed.insert(uid)
         dismissedKeys.insert(Blackbaud.stableKey(title: lastSeen[uid]?.title ?? title, due: lastSeen[uid]?.dueDate ?? due))

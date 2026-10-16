@@ -642,6 +642,27 @@ struct MatchRules {
         expect(BlackbaudMatch.find(feedUID: "abc", title: "Lab report", due: t0, in: list) == nil)
         expect(BlackbaudMatch.find(feedUID: "abc", title: "", due: t0, in: list) == nil)
     }
+
+    func movedDeadlineStillMatches() {
+        // The guardian moved the task three days later; Blackbaud still has it on the original day.
+        var state = BlackbaudState()
+        state.lastSeen["uid-1"] = BlackbaudAssignment(uid: "uid-1", title: "Algebra II: Worksheet 3.2", dueDate: t0)
+        let moved = TaxTask(title: "Algebra II: Worksheet 3.2", dueDate: t0.addingTimeInterval(3 * 86400),
+                            createdAt: t0.addingTimeInterval(-86400), source: .blackbaud(uid: "uid-1"))
+        expect(BlackbaudMatch.find(feedUID: "uid-1", title: moved.title, due: moved.dueDate, in: list) == nil)
+        let due = state.blackbaudDue(of: moved)
+        expect(due == t0)
+        expect(BlackbaudMatch.find(feedUID: "uid-1", title: moved.title, due: due, in: list)?.indexID == 90011)
+        // A UID Blackbaud has since changed: found by title instead.
+        var renamed = moved
+        renamed.source = .blackbaud(uid: "uid-old")
+        expect(state.blackbaudDue(of: renamed) == t0)
+        // Nothing known about it, or not from Blackbaud: its own deadline.
+        let manual = TaxTask(title: "Read", dueDate: t0, createdAt: t0)
+        expect(state.blackbaudDue(of: manual) == t0)
+        renamed.title = "Something else"
+        expect(state.blackbaudDue(of: renamed) == renamed.dueDate)
+    }
 }
 
 struct FeedText {
@@ -919,6 +940,7 @@ struct AssignmentPage {
 }
 
 let checks: [(String, () -> Void)] = [
+    ("MatchRules.movedDeadlineStillMatches", { MatchRules().movedDeadlineStillMatches() }),
     ("AssignmentPage.parsesEverything", { AssignmentPage().parsesEverything() }),
     ("AssignmentPage.urlsAndSites", { AssignmentPage().urlsAndSites() }),
     ("MoreTime.trackRecordCounts", { MoreTime().trackRecordCounts() }),

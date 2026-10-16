@@ -137,7 +137,7 @@ Blackbaud never needs anything submitted, but its Assignment Center has a To do 
 1. **Sign in once.** Go to **Tax Collector → Blackbaud → Sign in to Blackbaud**. The sign-in happens on Blackbaud's own page, or your school's Google or Microsoft page, so Tax Collector never sees your password. The session stays in the app's web storage.
 2. **Pay with proof as usual.** While the auditor checks your proof, it also turns the assignment's description into a checklist of everything it asks for.
 3. **Do the last check.** Once the proof is accepted, tick every item, then press **I've done all of this**.
-4. **Tax Collector marks it Completed.** It finds the assignment in Blackbaud by course, title and due date, since the feed carries no assignment ID. It sets the status to Completed and reads it back to confirm. If that fails, the task shows the reason and a Retry button.
+4. **Tax Collector marks it Completed.** It finds the assignment in Blackbaud by course, title and due date, since the feed carries no assignment ID. It goes by the date Blackbaud has, so a deadline your guardian moved still finds its assignment. It sets the status to Completed and reads it back to confirm. If that fails, the task shows the reason and a Retry button.
 
 This uses the same private web endpoints the Blackbaud student site uses (`/api/assignment2/assignmentstatusupdate` and the Assignment Center list). Blackbaud changes them now and then, so they're kept together in `Sources/TaxCollector/BlackbaudAPI.swift`.
 

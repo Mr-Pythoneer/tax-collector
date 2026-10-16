@@ -127,7 +127,8 @@ enum BlackbaudAPI {
 
     /// The assignment's full instructions, files and links, as its page in Blackbaud shows them.
     @MainActor
-    static func details(for task: TaxTask, link: BlackbaudLink) async -> Result<AssignmentDetails, BlackbaudLink.Failure> {
+    /// `due` is when Blackbaud has it due, which can differ from the task's deadline (see `BlackbaudState.blackbaudDue`).
+    static func details(for task: TaxTask, due: Date, link: BlackbaudLink) async -> Result<AssignmentDetails, BlackbaudLink.Failure> {
         guard case let .blackbaud(uid) = task.source, let host = link.host else {
             return .failure(.init(message: "This task didn't come from Blackbaud."))
         }
@@ -138,8 +139,8 @@ enum BlackbaudAPI {
                   let userID = (user["UserId"] as? NSNumber)?.intValue else {
                 return .failure(.init(message: "You're signed out of Blackbaud.", signedOut: true))
             }
-            let items = try await assignments(around: task.dueDate, link: link)
-            guard let match = BlackbaudMatch.find(feedUID: uid, title: task.title, due: task.dueDate, in: items) else {
+            let items = try await assignments(around: due, link: link)
+            guard let match = BlackbaudMatch.find(feedUID: uid, title: task.title, due: due, in: items) else {
                 return .failure(.init(message: "Couldn't find this assignment in Blackbaud."))
             }
             let r = try await link.call("GET", detailsPath(indexID: match.indexID, userID: userID))
@@ -168,21 +169,21 @@ enum BlackbaudAPI {
 
     /// Finds the assignment behind `task` and marks it Completed. Returns nil on success, or why it failed.
     @MainActor
-    static func markCompleted(_ task: TaxTask, link: BlackbaudLink) async -> String? {
+    static func markCompleted(_ task: TaxTask, due: Date, link: BlackbaudLink) async -> String? {
         guard case let .blackbaud(uid) = task.source else { return "This task didn't come from Blackbaud." }
         guard link.host != nil else { return "Turn on Blackbaud import first, so Tax Collector knows your school's address." }
         do {
             let context = try await link.call("GET", contextPath)
             guard isSignedIn(context.status, context.json) else { return "You're signed out of Blackbaud." }
 
-            let items = try await assignments(around: task.dueDate, link: link)
+            let items = try await assignments(around: due, link: link)
             guard !items.isEmpty else { return "Blackbaud didn't list any of your assignments." }
-            guard let match = BlackbaudMatch.find(feedUID: uid, title: task.title, due: task.dueDate, in: items) else {
+            guard let match = BlackbaudMatch.find(feedUID: uid, title: task.title, due: due, in: items) else {
                 return "Couldn't find “\(task.title)” in Blackbaud's assignment list."
             }
             if match.status == completedStatus { return nil }
 
-            return try await setStatus(match.indexID, to: completedStatus, around: task.dueDate, link: link)
+            return try await setStatus(match.indexID, to: completedStatus, around: due, link: link)
         } catch {
             return error.localizedDescription
         }

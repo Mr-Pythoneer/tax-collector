@@ -59,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             probed = true
             Task {
                 await BlackbaudProbe.run(link: self.blackbaudLink, tasks: self.model.tasks,
+                                         blackbaudDue: self.model.blackbaud.blackbaudDue(of:),
                                          to: self.model.store.dir.appendingPathComponent("blackbaud-probe.json"))
                 self.model.store.log("PROBE wrote blackbaud-probe.json")
             }
@@ -83,7 +84,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                 return .success(page)
             }
             self.blackbaudLink.configure(feedURL: self.model.feedURL)
-            return await BlackbaudAPI.details(for: task, link: self.blackbaudLink)
+            return await BlackbaudAPI.details(for: task, due: self.model.blackbaud.blackbaudDue(of: task),
+                                              link: self.blackbaudLink)
         }
         model.blackbaudDownload = { [weak self] url in
             guard let self else { return .failure(.init(message: "Tax Collector is shutting down.")) }
@@ -101,7 +103,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         model.blackbaudMarker = { [weak self] task in
             guard let self else { return "Tax Collector is shutting down." }
             self.blackbaudLink.configure(feedURL: self.model.feedURL)
-            let failure = await BlackbaudAPI.markCompleted(task, link: self.blackbaudLink)
+            let failure = await BlackbaudAPI.markCompleted(task, due: self.model.blackbaud.blackbaudDue(of: task),
+                                                           link: self.blackbaudLink)
             self.model.blackbaudSignedIn = await self.blackbaudLink.isSignedIn()
             return failure
         }

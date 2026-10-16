@@ -6,7 +6,7 @@ import TaxCore
 /// It records only the fields Tax Collector uses, never cookies or tokens, and changes nothing.
 @MainActor
 enum BlackbaudProbe {
-    static func run(link: BlackbaudLink, tasks: [TaxTask], to url: URL) async {
+    static func run(link: BlackbaudLink, tasks: [TaxTask], blackbaudDue: (TaxTask) -> Date, to url: URL) async {
         var report: [String: Any] = ["generated": ISO8601DateFormatter().string(from: Date())]
         do {
             let context = try await link.call("GET", BlackbaudAPI.contextPath)
@@ -33,37 +33,62 @@ enum BlackbaudProbe {
             report["parsedSample"] = items.prefix(6).map(describe)
             report["matches"] = tasks.compactMap { task -> [String: Any]? in
                 guard case let .blackbaud(uid) = task.source else { return nil }
-                let match = BlackbaudMatch.find(feedUID: uid, title: task.title, due: task.dueDate, in: items)
-                return ["task": task.title, "due": task.dueDate.description,
+                let match = BlackbaudMatch.find(feedUID: uid, title: task.title, due: blackbaudDue(task), in: items)
+                return ["task": task.title, "due": task.dueDate.description, "blackbaudDue": blackbaudDue(task).description,
                         "match": match.map(describe) ?? "NONE"] as [String: Any]
             }
 
-            // One assignment's page, as the details window reads it. Counts only, not what it says.
-            let matched = tasks.first { task in
-                guard case let .blackbaud(uid) = task.source else { return false }
-                return BlackbaudMatch.find(feedUID: uid, title: task.title, due: task.dueDate, in: items) != nil
-            }
-            if let task = matched {
-                switch await BlackbaudAPI.details(for: task, link: link) {
+            // Each assignment's page, as the details window reads it. Counts only, not what it says.
+            // One teacher's file is downloaded to see that it really comes down with the sign-in.
+            let host = link.host ?? ""
+            var pages: [[String: Any]] = []
+            var downloadTried = false
+            for task in tasks.prefix(15) {
+                guard case let .blackbaud(uid) = task.source,
+                      BlackbaudMatch.find(feedUID: uid, title: task.title, due: blackbaudDue(task), in: items) != nil else { continue }
+                switch await BlackbaudAPI.details(for: task, due: blackbaudDue(task), link: link) {
                 case let .success(page):
-                    let host = link.host ?? ""
-                    report["details"] = ["task": task.title, "type": page.type, "maxPoints": page.maxPoints ?? -1,
-                                         "submitsOnline": page.submitsOnline, "instructionsLength": page.instructionsHTML.count,
-                                         "attachments": page.attachments.count,
-                                         "attachmentsOnSchoolSite": page.attachments.filter {
-                                             AssignmentDetailsParser.isOnSchoolSite($0.url, host: host)
-                                         }.count,
-                                         "links": page.links.count] as [String: Any]
+                    var details: [String: Any] = [
+                        "task": task.title, "type": page.type, "maxPoints": page.maxPoints ?? -1,
+                        "submitsOnline": page.submitsOnline, "instructionsLength": page.instructionsHTML.count,
+                        "attachments": page.attachments.count,
+                        "attachmentsOnSchoolSite": page.attachments.filter {
+                            AssignmentDetailsParser.isOnSchoolSite($0.url, host: host)
+                        }.count,
+                        "attachmentHosts": Array(Set(page.attachments.compactMap(\.url.host))).sorted(),
+                        "links": page.links.count,
+                        "linkHosts": Array(Set(page.links.compactMap(\.url.host))).sorted()]
+                    if !downloadTried, let file = page.attachments.first {
+                        downloadTried = true
+                        switch await BlackbaudAPI.download(file.url, link: link) {
+                        case let .success(data): details["download"] = ["bytes": data.count, "kind": kind(of: data)] as [String: Any]
+                        case let .failure(problem): details["download"] = ["error": problem.message]
+                        }
+                    }
+                    pages.append(details)
                 case let .failure(problem):
-                    report["details"] = ["task": task.title, "error": problem.message]
+                    pages.append(["task": task.title, "error": problem.message])
                 }
             }
+            report["details"] = pages
         } catch {
             report["error"] = "\(error)"
         }
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: url, options: .atomic)
         }
+    }
+
+    /// What a downloaded file looks like from its first bytes. A web page here usually means a sign-in page.
+    private static func kind(of data: Data) -> String {
+        let head = [UInt8](data.prefix(8))
+        if head.starts(with: Array("%PDF".utf8)) { return "pdf" }
+        if head.starts(with: [0x50, 0x4B, 0x03, 0x04]) { return "zip (Office file)" }
+        if head.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return "png" }
+        if head.starts(with: [0xFF, 0xD8]) { return "jpeg" }
+        if let text = String(data: data.prefix(200), encoding: .utf8),
+           text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<") { return "html (not a file)" }
+        return "other"
     }
 
     private static func describe(_ item: BlackbaudListedAssignment) -> [String: Any] {

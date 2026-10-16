@@ -76,7 +76,7 @@ struct AssignmentDetailView: View {
             .foregroundStyle(.secondary)
             if case let .loaded(page) = model.details[taskID], !page.type.isEmpty || page.maxPoints != nil {
                 Text([page.type.isEmpty ? nil : page.type,
-                      page.maxPoints.map { "\(Int($0)) points" },
+                      page.maxPoints.map(pointsText),
                       page.submitsOnline ? "handed in on Blackbaud" : nil]
                     .compactMap { $0 }.joined(separator: " · "))
                     .font(.callout)
@@ -262,6 +262,12 @@ struct AssignmentDetailView: View {
         case .rejected: Label("Not accepted", systemImage: "xmark.circle.fill").foregroundStyle(.red)
         case .error: Label("Couldn't check", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
         }
+    }
+
+    /// "1 point", "10 points", "2.5 points".
+    private func pointsText(_ points: Double) -> String {
+        let number = points == points.rounded() ? String(Int(points)) : String(format: "%g", points)
+        return points == 1 ? "1 point" : "\(number) points"
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
