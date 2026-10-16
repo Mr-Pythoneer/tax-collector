@@ -22,6 +22,23 @@ The app is light by default. **Appearance** in the menu bar menu switches to Dar
 - **Guardian code.** A parent or friend sets it on first launch, and it is the only override. It can unlock for a while, excuse a task, approve a proof by hand, change a deadline, change the late penalty or the allowlist, or uninstall the app. Wrong codes back off: after the third wrong code you wait 30 s, then 60 s, and so on.
 - **Clock guard.** Winding the clock back doesn't move you back before a deadline.
 
+## Install from the disk image (for testers)
+
+Download `TaxCollector-<version>.dmg` from the GitHub Releases page. It needs a Mac with Apple silicon and macOS 14 or later.
+
+1. **Copy it:** drag Tax Collector into Applications.
+2. **Get past macOS's warning:** the app isn't notarized (that needs a paid Apple developer account), so the first time you open it, macOS refuses. Click Done, then go to System Settings → Privacy & Security and click **Open Anyway**.
+3. **Finish setup:** read the welcome screen, have the guardian set their code, and click **Finish Setup**. If the app was opened from somewhere else, it copies itself into Applications first. Then it sets itself to run in the background and at every login. No Terminal needed.
+
+**Proof checking** needs Claude Code, signed in once:
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+claude auth login
+```
+
+`./scripts/make-dmg.sh` builds the disk image, with `Resources/How to Install.txt` inside it.
+
 ## Build and install
 
 Command Line Tools are enough; Xcode isn't needed.
@@ -55,6 +72,7 @@ TAXCOLLECTOR_DATA_DIR=/tmp/tc-test TAXCOLLECTOR_DRY_RUN=1 "build/Tax Collector.a
 - `TAXCOLLECTOR_SELFTEST=1` runs every feature through the app's own code with a fake Claude and a fake Blackbaud. It writes `selftest.txt` and quits. Always use it with a throwaway `TAXCOLLECTOR_DATA_DIR`.
 - `TAXCOLLECTOR_TEST_SHEET=new|edit|proof|lastcheck|guardian|blackbaud|auditor|log|lock`, optionally followed by `:part of a task title`, opens that screen at launch for screenshots.
 - `TAXCOLLECTOR_TEST_GUARDIAN_CODE` types a guardian code into the code box. It still has to be the right code.
+- Setup is never run in a test like this unless you add `TAXCOLLECTOR_TEST_SETUP=1`. With it, `TAXCOLLECTOR_TEST_APPLICATIONS_DIR` stands in for the Applications folder, and `TAXCOLLECTOR_LABEL` names the background copy. Launching with `--finish-setup` acts like clicking Finish Setup.
 - `TAXCOLLECTOR_BLACKBAUD_PROBE=1` opens the Blackbaud sign-in if needed, then writes `blackbaud-probe.json`: a read-only report of what Blackbaud's endpoints return and which assignment each imported task matches. It saves only the fields the app uses, never cookies or tokens. Run this first when Blackbaud changes something.
 - `TAXCOLLECTOR_TEST_LAST_CHECK=<part of a title>` opens that paid task's last check, ticks everything and confirms it, just as your clicks would. **This really marks the assignment Completed in Blackbaud.**
 - To test Blackbaud import without a real feed, put `"blackbaudURL": "file:///path/to/sample.ics"` in that folder's `settings.json`. The app polls it at launch.

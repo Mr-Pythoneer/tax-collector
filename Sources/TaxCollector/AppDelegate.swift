@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private var notificationsAllowed = false
     /// Dry runs and scratch-data test runs can be quit normally; the real thing can't.
     private var canQuitFreely = false
+    /// Test runs (separate data folder) never install anything unless TAXCOLLECTOR_TEST_SETUP=1.
+    private var setupAllowed = true
 
     private static let showNotification = Notification.Name(AppModel.label + ".show")
 
@@ -25,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         let dryRun = env["TAXCOLLECTOR_DRY_RUN"] == "1"
         let testing = !(env["TAXCOLLECTOR_DATA_DIR"] ?? "").isEmpty
         canQuitFreely = dryRun || env["TAXCOLLECTOR_ALLOW_QUIT"] == "1"
+        setupAllowed = !testing || env["TAXCOLLECTOR_TEST_SETUP"] == "1"
         if !testing { enforceSingleInstance() }
 
         model = AppModel(store: Store(), dryRun: dryRun)
@@ -60,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             self?.model.blackbaudSignedIn = signedIn
             if signedIn { runProbe() }
         }
+        model.onFinishSetup = { [weak self] in self?.finishSetup() }
         model.onBlackbaudSignIn = { [weak self] in
             guard let self else { return }
             self.blackbaudLink.configure(feedURL: self.model.feedURL)
@@ -115,6 +119,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         model.start()
         let startedAtLogin = CommandLine.arguments.contains("--launchd")
         if model.guardian == nil || !startedAtLogin { showMain() }
+        refreshSetupNeed()
+        if startedAtLogin && model.settings.justSetUp {
+            model.settings.justSetUp = false
+            model.store.saveSettings(model.settings)
+            showMain()
+            showBanner("Tax Collector is set up. It runs in the menu bar and starts when you log in.")
+        }
+        if CommandLine.arguments.contains("--finish-setup") && model.guardian != nil {
+            finishSetup()
+        }
 
         // Testing aids: open one sheet for a screenshot, or run the self-test and quit.
         if let spec = env["TAXCOLLECTOR_TEST_SHEET"], !spec.isEmpty {
@@ -127,6 +141,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                 self.model.allowQuit = true
                 NSApp.terminate(nil)
             }
+        }
+    }
+
+    // MARK: Setup
+
+    private func refreshSetupNeed() {
+        if !setupAllowed || BackgroundAgent.isInstalled {
+            model.setupNeed = nil
+        } else {
+            model.setupNeed = BackgroundAgent.isInApplicationsFolder ? .runInBackground : .moveToApplications
+        }
+    }
+
+    /// Copies the app into Applications if it isn't there yet (the copy then carries on), or else sets it to run
+    /// in the background and at every login, and hands over to that background copy.
+    private func finishSetup() {
+        guard setupAllowed else { return }
+        model.setupError = nil
+        if !BackgroundAgent.isInApplicationsFolder {
+            do {
+                let copy = try AppMover.copyToApplications()
+                model.store.log("SETUP copied the app to \(copy.deletingLastPathComponent().path)")
+                let configuration = NSWorkspace.OpenConfiguration()
+                configuration.arguments = ["--finish-setup"]
+                configuration.createsNewApplicationInstance = true
+                configuration.environment = ProcessInfo.processInfo.environment.filter { $0.key.hasPrefix("TAXCOLLECTOR_") }
+                NSWorkspace.shared.openApplication(at: copy, configuration: configuration) { _, error in
+                    DispatchQueue.main.async {
+                        if let error {
+                            self.model.setupError = "Copied Tax Collector to \(copy.deletingLastPathComponent().path), but couldn't open it: \(error.localizedDescription). Open it from there."
+                            return
+                        }
+                        self.model.allowQuit = true
+                        NSApp.terminate(nil)
+                    }
+                }
+            } catch {
+                model.setupError = error.localizedDescription
+            }
+            return
+        }
+        do {
+            model.settings.justSetUp = true
+            model.store.saveSettings(model.settings)
+            try BackgroundAgent.install()
+            model.store.log("SETUP runs in the background and at login from \(Bundle.main.bundlePath)")
+            // The background copy takes over from here.
+            model.allowQuit = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { NSApp.terminate(nil) }
+        } catch {
+            model.settings.justSetUp = false
+            model.store.saveSettings(model.settings)
+            model.setupError = error.localizedDescription
+            refreshSetupNeed()
         }
     }
 
@@ -201,7 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: id)
             .filter { $0.processIdentifier != me }
         guard !others.isEmpty else { return }
-        if CommandLine.arguments.contains("--launchd") {
+        if CommandLine.arguments.contains("--launchd") || CommandLine.arguments.contains("--finish-setup") {
             others.forEach { $0.forceTerminate() }
         } else {
             DistributedNotificationCenter.default().postNotificationName(

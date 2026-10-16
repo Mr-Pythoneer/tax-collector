@@ -1,0 +1,52 @@
+Tax Collector
+=============
+
+Needs a Mac with Apple silicon (M1 or newer) and macOS 14 or later.
+
+
+INSTALL
+
+1. Drag "Tax Collector" onto the Applications folder in this window.
+
+2. Open Tax Collector from your Applications folder.
+   macOS will say it can't check the app for malware, because it isn't
+   from the App Store. Click "Done", then open System Settings > Privacy &
+   Security, scroll down, and click "Open Anyway" next to Tax Collector.
+   (It asks for your Mac's password.)
+
+3. Read the welcome screen, then hand the Mac to a parent or friend to
+   set the guardian code, and click "Finish Setup".
+   Tax Collector then lives in the menu bar (the columns icon) and starts
+   every time you log in.
+
+4. Click "Allow" when it asks to send notifications, so you get warnings
+   before anything locks.
+
+
+PROOF CHECKING
+
+Claude checks your proof, using Claude Code. Install it and sign in once,
+in Terminal:
+
+    curl -fsSL https://claude.ai/install.sh | bash
+    claude auth login
+
+Without it, your guardian has to approve every proof by hand.
+
+
+GOOD TO KNOW
+
+- During a lock only Arc, Claude, the Microsoft 365 apps, Mail, Zoom,
+  VooV Meeting and Activity Monitor stay open. If you use another browser
+  (Safari or Chrome), your guardian can allow it in
+  Guardian Settings > Extra allowed apps.
+- Save your work before deadlines. When a lock starts, other apps are
+  asked to quit, then closed after 10 seconds.
+- A task is locked in 24 hours before it's due. After that, only your
+  guardian can change or delete it.
+
+
+UNINSTALL
+
+Guardian Settings > Uninstall Tax Collector. It stops the app and moves it
+to the Trash. Your tasks stay in ~/Library/Application Support/TaxCollector.

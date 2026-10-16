@@ -19,13 +19,16 @@ public struct BlackbaudAssignment: Codable, Equatable, Sendable {
 public struct BlackbaudState: Codable, Equatable, Sendable {
     /// What the feed last said about each imported assignment, so a poll can tell a teacher's change from your own edit.
     public var lastSeen: [String: BlackbaudAssignment]
-    /// Assignments you deleted. The next poll doesn't bring them back.
+    /// Assignments you deleted, by UID. The next poll doesn't bring them back.
     public var dismissed: Set<String>
+    /// The same, by class, title and due day, because Blackbaud changes UIDs every so often.
+    public var dismissedKeys: Set<String>
     public var lastSync: Date?
 
     public init() {
         lastSeen = [:]
         dismissed = []
+        dismissedKeys = []
         lastSync = nil
     }
 
@@ -34,12 +37,18 @@ public struct BlackbaudState: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         lastSeen = try c.decodeIfPresent([String: BlackbaudAssignment].self, forKey: .lastSeen) ?? [:]
         dismissed = try c.decodeIfPresent(Set<String>.self, forKey: .dismissed) ?? []
+        dismissedKeys = try c.decodeIfPresent(Set<String>.self, forKey: .dismissedKeys) ?? []
         lastSync = try c.decodeIfPresent(Date.self, forKey: .lastSync)
     }
 
-    public mutating func dismiss(uid: String) {
+    public mutating func dismiss(uid: String, title: String, due: Date) {
         dismissed.insert(uid)
+        dismissedKeys.insert(Blackbaud.stableKey(title: lastSeen[uid]?.title ?? title, due: lastSeen[uid]?.dueDate ?? due))
         lastSeen[uid] = nil
+    }
+
+    public func isDismissed(_ item: BlackbaudAssignment) -> Bool {
+        dismissed.contains(item.uid) || dismissedKeys.contains(Blackbaud.stableKey(title: item.title, due: item.dueDate))
     }
 }
 
@@ -184,7 +193,8 @@ public enum Blackbaud {
     /// Merges one poll into the task list.
     ///
     /// - New assignments due in the future become tasks. Past ones aren't owed, so they're skipped.
-    /// - A UID that already has a task, or that you deleted, is never imported twice.
+    /// - An assignment that already has a task, or that you deleted, is never imported twice, even after
+    ///   Blackbaud changes its UID (see `matchTasks`).
     /// - When the teacher changes an assignment, the change goes through the same rule as your own edits:
     ///   anything while it isn't locked in, only an earlier deadline once it is. Never a deadline in the past.
     /// - Assignments that drop out of the feed stay. The feed only looks a few weeks ahead.
@@ -194,9 +204,18 @@ public enum Blackbaud {
         var state = state
         var added: [TaxTask] = []
         var notes: [String] = []
+        // The same UID twice in one feed is one assignment.
+        var seenUIDs = Set<String>()
+        let assignments = assignments.filter { seenUIDs.insert($0.uid).inserted }
+        let owner = matchTasks(tasks: tasks, state: state, assignments: assignments)
 
-        for item in assignments {
-            if let i = tasks.firstIndex(where: { $0.source == .blackbaud(uid: item.uid) }) {
+        for (n, item) in assignments.enumerated() {
+            if let i = owner[n] {
+                // Blackbaud gave it a new UID: carry the history over to it.
+                if case let .blackbaud(oldUID) = tasks[i].source, oldUID != item.uid {
+                    tasks[i].source = .blackbaud(uid: item.uid)
+                    state.lastSeen[item.uid] = state.lastSeen.removeValue(forKey: oldUID)
+                }
                 let before = state.lastSeen[item.uid]
                 state.lastSeen[item.uid] = item
                 guard let before, before != item, tasks[i].isPending else { continue }
@@ -221,7 +240,7 @@ public enum Blackbaud {
                 } else {
                     notes.append("kept \"\(original.title)\" as is: it's locked in and the feed's change would loosen it")
                 }
-            } else if !state.dismissed.contains(item.uid), item.dueDate > now {
+            } else if !state.isDismissed(item), item.dueDate > now {
                 let task = TaxTask(title: item.title, details: item.details, dueDate: item.dueDate,
                                    createdAt: now, source: .blackbaud(uid: item.uid))
                 tasks.append(task)
@@ -230,5 +249,73 @@ public enum Blackbaud {
             }
         }
         return BlackbaudSyncResult(tasks: tasks, state: state, added: added, notes: notes)
+    }
+
+    /// The furthest apart two due dates can be and still be the same assignment, for when Blackbaud changes UIDs.
+    /// Under a week, so next week's "Weekly quiz" is never mistaken for this week's.
+    public static let rematchWindow: TimeInterval = 3 * 86400
+
+    /// Class, title and due day: what identifies an assignment when its UID doesn't.
+    public static func stableKey(title: String, due: Date, calendar: Calendar = .current) -> String {
+        let d = calendar.dateComponents([.year, .month, .day], from: due)
+        return "\(BlackbaudMatch.normalized(title))|\(d.year ?? 0)-\(d.month ?? 0)-\(d.day ?? 0)"
+    }
+
+    /// Which existing task each assignment belongs to (by index), or nil for a new one.
+    /// Same UID first. Blackbaud changes every UID now and then, so after that, the same class and title with
+    /// the closest due date (within `rematchWindow`), among tasks whose old UID isn't still in this feed.
+    /// Pairs are made closest-first across the whole feed, so repeated titles each get their own task.
+    static func matchTasks(tasks: [TaxTask], state: BlackbaudState, assignments: [BlackbaudAssignment]) -> [Int: Int] {
+        var owner: [Int: Int] = [:]
+        var taken = Set<Int>()
+        var uidToTask: [String: Int] = [:]
+        for (i, task) in tasks.enumerated() {
+            if case let .blackbaud(uid) = task.source { uidToTask[uid] = i }
+        }
+        for (n, item) in assignments.enumerated() {
+            if let i = uidToTask[item.uid], !taken.contains(i) {
+                owner[n] = i
+                taken.insert(i)
+            }
+        }
+        let feedUIDs = Set(assignments.map(\.uid))
+        var pairs: [(n: Int, i: Int, distance: TimeInterval)] = []
+        for (n, item) in assignments.enumerated() where owner[n] == nil {
+            let wanted = BlackbaudMatch.normalized(item.title)
+            for (i, task) in tasks.enumerated() where !taken.contains(i) {
+                guard case let .blackbaud(uid) = task.source, !feedUIDs.contains(uid) else { continue }
+                let titles = [state.lastSeen[uid]?.title, task.title].compactMap { $0 }.map(BlackbaudMatch.normalized)
+                guard titles.contains(wanted) else { continue }
+                let distance = abs((state.lastSeen[uid]?.dueDate ?? task.dueDate).timeIntervalSince(item.dueDate))
+                if distance <= rematchWindow { pairs.append((n, i, distance)) }
+            }
+        }
+        for pair in pairs.sorted(by: { $0.distance < $1.distance }) where owner[pair.n] == nil && !taken.contains(pair.i) {
+            owner[pair.n] = pair.i
+            taken.insert(pair.i)
+        }
+        return owner
+    }
+
+    /// Older versions imported a second copy whenever Blackbaud changed its UIDs. Keep one task per assignment
+    /// (the one with the most progress), and only drop copies that have no proof and aren't done.
+    public static func mergeDuplicates(_ tasks: [TaxTask], state: BlackbaudState) -> (tasks: [TaxTask], removed: [TaxTask]) {
+        var groups: [String: [Int]] = [:]
+        for (i, task) in tasks.enumerated() {
+            guard case let .blackbaud(uid) = task.source else { continue }
+            let seen = state.lastSeen[uid]
+            groups[stableKey(title: seen?.title ?? task.title, due: seen?.dueDate ?? task.dueDate), default: []].append(i)
+        }
+        func progress(_ t: TaxTask) -> Int { (t.isPending ? 0 : 2) + (t.proofs.isEmpty ? 0 : 1) }
+        var drop = Set<Int>()
+        for indices in groups.values where indices.count > 1 {
+            let keep = indices.max { a, b in
+                progress(tasks[a]) != progress(tasks[b]) ? progress(tasks[a]) < progress(tasks[b])
+                    : tasks[a].createdAt > tasks[b].createdAt
+            }!
+            for i in indices where i != keep && tasks[i].isPending && tasks[i].proofs.isEmpty { drop.insert(i) }
+        }
+        let removed = drop.sorted().map { tasks[$0] }
+        return (tasks.enumerated().filter { !drop.contains($0.offset) }.map(\.element), removed)
     }
 }

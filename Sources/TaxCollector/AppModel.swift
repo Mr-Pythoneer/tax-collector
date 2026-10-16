@@ -8,6 +8,12 @@ enum GuardianCheck: Equatable {
     case coolingDown(until: Date)
 }
 
+/// What's left before Tax Collector can lock anything.
+enum SetupNeed: Equatable {
+    case moveToApplications
+    case runInBackground
+}
+
 enum EditResult {
     case saved
     case needsGuardian
@@ -22,7 +28,7 @@ enum FeedCheck {
 @MainActor
 @Observable
 final class AppModel {
-    static let label = "io.github.mrpythoneer.taxcollector"
+    nonisolated static let label = "io.github.mrpythoneer.taxcollector"
     static let warningMarks: [TimeInterval] = [24 * 3600, 3600, 15 * 60, 5 * 60]
 
     let store: Store
@@ -40,6 +46,8 @@ final class AppModel {
     var feedSyncing = false
     var feedError: String?
     var blackbaudSignedIn = false
+    var setupNeed: SetupNeed?
+    var setupError: String?
 
     @ObservationIgnored let enforcer: Enforcer
     @ObservationIgnored var onLockChange: (Bool) -> Void = { _ in }
@@ -49,6 +57,8 @@ final class AppModel {
     @ObservationIgnored var onImported: ([TaxTask]) -> Void = { _ in }
     /// Opens the Blackbaud sign-in window.
     @ObservationIgnored var onBlackbaudSignIn: () -> Void = {}
+    /// Moves the app into Applications if needed, then sets it to run in the background.
+    @ObservationIgnored var onFinishSetup: () -> Void = {}
     @ObservationIgnored var onBlackbaudSignOut: () -> Void = {}
     /// Marks an assignment Completed in Blackbaud. Returns nil on success, or why it failed.
     @ObservationIgnored var blackbaudMarker: (TaxTask) async -> String? = { _ in "Blackbaud isn't connected." }
@@ -84,6 +94,14 @@ final class AppModel {
             }
         }
         if interrupted { store.saveTasks(tasks) }
+
+        // Older versions imported a second copy of everything whenever Blackbaud changed its UIDs.
+        let merged = Blackbaud.mergeDuplicates(tasks, state: blackbaud)
+        if !merged.removed.isEmpty {
+            tasks = merged.tasks
+            store.saveTasks(tasks)
+            store.log("FEED merged \(merged.removed.count) duplicate imported task(s)")
+        }
 
         enforcer.isAllowed = { [weak self] id in
             guard let self else { return true }
@@ -208,7 +226,7 @@ final class AppModel {
         tasks.removeAll { $0.id == id }
         try? FileManager.default.removeItem(at: store.proofsRoot.appendingPathComponent(id.uuidString))
         if case let .blackbaud(uid) = t.source {
-            blackbaud.dismiss(uid: uid)
+            blackbaud.dismiss(uid: uid, title: t.title, due: t.dueDate)
             store.saveBlackbaud(blackbaud)
         }
         save()
@@ -337,11 +355,8 @@ final class AppModel {
             return .bad(message)
         case let .events(events):
             let items = Blackbaud.assignments(from: events, allDayDueMinutes: settings.allDayDueMinutes)
-            let known = Set(tasks.compactMap { task -> String? in
-                if case let .blackbaud(uid) = task.source { return uid }
-                return nil
-            }).union(blackbaud.dismissed)
-            let upcoming = items.filter { $0.dueDate > now && !known.contains($0.uid) }.sorted { $0.dueDate < $1.dueDate }
+            let wouldAdd = Set(Blackbaud.sync(tasks: tasks, state: blackbaud, assignments: items, now: now).added.map(\.title))
+            let upcoming = items.filter { wouldAdd.contains($0.title) }.sorted { $0.dueDate < $1.dueDate }
             return .ok(url: url, upcoming: upcoming, total: events.count)
         }
     }
@@ -411,7 +426,9 @@ final class AppModel {
     private func importFeed(_ events: [ICalEvent]) {
         let items = Blackbaud.assignments(from: events, allDayDueMinutes: settings.allDayDueMinutes)
         let result = Blackbaud.sync(tasks: tasks, state: blackbaud, assignments: items, now: now)
-        tasks = result.tasks
+        let merged = Blackbaud.mergeDuplicates(result.tasks, state: result.state)
+        if !merged.removed.isEmpty { store.log("FEED merged \(merged.removed.count) duplicate imported task(s)") }
+        tasks = merged.tasks
         blackbaud = result.state
         blackbaud.lastSync = now
         feedError = nil
@@ -566,16 +583,13 @@ final class AppModel {
 
     func uninstall() {
         store.log("GUARDIAN uninstalled Tax Collector")
-        let plist = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents/\(Self.label).plist")
-        try? FileManager.default.removeItem(at: plist)
         enforcer.deactivate()
         allowQuit = true
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        p.arguments = ["bootout", "gui/\(getuid())/\(Self.label)"]
-        try? p.run()
-        p.waitUntilExit()
+        // Into the Trash first: removing the background copy ends this process.
+        if BackgroundAgent.isInApplicationsFolder {
+            try? FileManager.default.trashItem(at: Bundle.main.bundleURL, resultingItemURL: nil)
+        }
+        BackgroundAgent.remove()
         NSApp.terminate(nil)
     }
 

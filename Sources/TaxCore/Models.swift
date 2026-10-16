@@ -134,6 +134,8 @@ public struct Settings: Codable, Equatable, Sendable {
     public var allDayDueMinutes: Int
     /// "light" (the default), "dark" or "system". Older versions saved "paper" and "ink".
     public var appearance: String
+    /// Set just before setup hands over to the background copy, so that copy can say it's ready.
+    public var justSetUp: Bool
 
     public init() {
         penaltyMinutes = 30
@@ -148,6 +150,7 @@ public struct Settings: Codable, Equatable, Sendable {
         blackbaudOnSince = nil
         allDayDueMinutes = Blackbaud.defaultAllDayDueMinutes
         appearance = "light"
+        justSetUp = false
     }
 
     // Decode field by field so adding a setting later doesn't wipe saved ones.
@@ -166,5 +169,6 @@ public struct Settings: Codable, Equatable, Sendable {
         blackbaudOnSince = try c.decodeIfPresent(Date.self, forKey: .blackbaudOnSince)
         allDayDueMinutes = try c.decodeIfPresent(Int.self, forKey: .allDayDueMinutes) ?? allDayDueMinutes
         appearance = try c.decodeIfPresent(String.self, forKey: .appearance) ?? appearance
+        justSetUp = try c.decodeIfPresent(Bool.self, forKey: .justSetUp) ?? false
     }
 }

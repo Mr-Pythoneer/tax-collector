@@ -16,7 +16,7 @@ struct AuditorView: View {
                 Spacer()
                 Button("Check Again") { model.refreshAuditorStatus() }.controlSize(.small)
             }
-            Text("Proofs are checked by the Claude command-line tool at \(model.settings.claudePath). It needs to be signed in with your Claude account. Do one of these in Terminal:")
+            Text("Proofs are checked by the Claude command-line tool\(ProofVerifier.claudePath(model.settings).map { " at \($0)" } ?? ", which isn't installed yet (get it from Anthropic: it's called Claude Code)"). It needs to be signed in with your Claude account. Do one of these in Terminal:")
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 6) {

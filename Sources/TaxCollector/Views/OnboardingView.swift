@@ -38,9 +38,16 @@ struct OnboardingView: View {
                     if !message.isEmpty {
                         Text(message).font(.callout).foregroundStyle(.red)
                     }
+                    if let error = model.setupError {
+                        Text(error).font(.callout).foregroundStyle(.red)
+                    }
                     HStack {
+                        Text("Then Tax Collector moves into Applications if needed, and runs in the menu bar from every login on.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                         Spacer()
-                        Button("Set Guardian Code", action: save)
+                        Button("Finish Setup", action: save)
                             .keyboardShortcut(.defaultAction)
                             .disabled(code.isEmpty)
                     }
@@ -65,5 +72,6 @@ struct OnboardingView: View {
             return
         }
         model.setupGuardian(code: code)
+        model.onFinishSetup()
     }
 }

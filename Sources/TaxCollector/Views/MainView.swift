@@ -165,6 +165,25 @@ struct TaskListView: View {
     /// Problems worth seeing before the tasks: the lock, a guardian unlock, proof checking or the feed not working.
     private var notices: [Notice] {
         var out: [Notice] = []
+        let finish: () -> Void = { model.onFinishSetup() }
+        switch model.setupNeed {
+        case .moveToApplications:
+            out.append(Notice(id: "setup", symbol: "exclamationmark.triangle.fill", color: .orange,
+                              title: "Finish setting up",
+                              detail: "Tax Collector has to be in your Applications folder before it can run in the background and lock anything.",
+                              button: "Move to Applications", action: finish))
+        case .runInBackground:
+            out.append(Notice(id: "setup", symbol: "exclamationmark.triangle.fill", color: .orange,
+                              title: "Tax Collector isn't running in the background",
+                              detail: "It can't lock anything until it's set to start at login.",
+                              button: "Set Up", action: finish))
+        case nil:
+            break
+        }
+        if let error = model.setupError {
+            out.append(Notice(id: "setup-error", symbol: "xmark.octagon.fill", color: .red,
+                              title: "Setup didn't finish", detail: error, button: "Try Again", action: finish))
+        }
         if model.lock.isLocked {
             out.append(Notice(id: "lock", symbol: "lock.fill", color: .red, title: "Your Mac is locked",
                               detail: model.lock.overdue.isEmpty

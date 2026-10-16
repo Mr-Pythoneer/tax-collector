@@ -196,7 +196,7 @@ struct Persistence {
 
         var feed = BlackbaudState()
         feed.lastSeen["u1"] = BlackbaudAssignment(uid: "u1", title: "Essay", dueDate: t0)
-        feed.dismiss(uid: "u2")
+        feed.dismiss(uid: "u2", title: "Gone", due: t0)
         feed.lastSync = t0
         store.saveBlackbaud(feed)
         expect(store.loadBlackbaud() == feed)
@@ -462,7 +462,7 @@ struct FeedSync {
 
     func deletedAssignmentsStayDeleted() {
         var state = imported([essay]).state
-        state.dismiss(uid: "u1")
+        state.dismiss(uid: "u1", title: essay.title, due: essay.dueDate)
         let r = Blackbaud.sync(tasks: [], state: state, assignments: [essay], now: t0.addingTimeInterval(60))
         expect(r.tasks.isEmpty)
         expect(r.state.lastSeen["u1"] == nil)
@@ -742,7 +742,69 @@ struct RealFeedMatching {
     }
 }
 
+struct ChangingUIDs {
+    let day: TimeInterval = 86400
+    func item(_ uid: String, _ title: String, in days: Double) -> BlackbaudAssignment {
+        BlackbaudAssignment(uid: uid, title: title, dueDate: t0.addingTimeInterval(days * 86400))
+    }
+
+    func newUIDsDontDuplicate() {
+        let first = Blackbaud.sync(tasks: [], state: BlackbaudState(), assignments: [item("a", "Math 7: Lesson 4", in: 3), item("b", "Science 7: Lab", in: 4)], now: t0)
+        let later = Blackbaud.sync(tasks: first.tasks, state: first.state,
+                                   assignments: [item("x", "Math 7: Lesson 4", in: 3), item("y", "Science 7: Lab", in: 4)], now: t0.addingTimeInterval(3600))
+        expect(later.tasks.count == 2)
+        expect(later.added.isEmpty)
+        expect(later.tasks.contains { $0.source == .blackbaud(uid: "x") })
+        expect(later.state.lastSeen["x"] != nil && later.state.lastSeen["a"] == nil)
+    }
+
+    func deletedStaysDeletedAfterNewUID() {
+        var state = Blackbaud.sync(tasks: [], state: BlackbaudState(), assignments: [item("a", "Math 7: Lesson 4", in: 3)], now: t0).state
+        state.dismiss(uid: "a", title: "Math 7: Lesson 4", due: t0.addingTimeInterval(3 * 86400))
+        let r = Blackbaud.sync(tasks: [], state: state, assignments: [item("z", "Math 7: Lesson 4", in: 3)], now: t0.addingTimeInterval(3600))
+        expect(r.tasks.isEmpty)
+    }
+
+    func weeklyRepeatsGetTheirOwnTasks() {
+        let first = Blackbaud.sync(tasks: [], state: BlackbaudState(), assignments: [item("w1", "English 7: Reading log", in: 2)], now: t0)
+        // New UIDs, and next week's log appears too. Listed first, it still mustn't take this week's task.
+        let r = Blackbaud.sync(tasks: first.tasks, state: first.state,
+                               assignments: [item("w2b", "English 7: Reading log", in: 9), item("w1b", "English 7: Reading log", in: 2)],
+                               now: t0.addingTimeInterval(3600))
+        expect(r.tasks.count == 2)
+        expect(r.added.count == 1)
+        expect(r.added.first.map { abs($0.dueDate.timeIntervalSince(t0.addingTimeInterval(9 * 86400))) < 1 } == true)
+    }
+
+    func teacherMovesDateWithNewUID() {
+        let first = Blackbaud.sync(tasks: [], state: BlackbaudState(), assignments: [item("a", "Math 7: Test", in: 5)], now: t0)
+        let r = Blackbaud.sync(tasks: first.tasks, state: first.state, assignments: [item("b", "Math 7: Test", in: 6)], now: t0.addingTimeInterval(3600))
+        expect(r.tasks.count == 1)
+        expect(r.tasks.first.map { abs($0.dueDate.timeIntervalSince(t0.addingTimeInterval(6 * 86400))) < 1 } == true)
+    }
+
+    func oldDuplicatesMerge() {
+        var done = TaxTask(title: "Math 7: Lesson 4", dueDate: t0, createdAt: t0, source: .blackbaud(uid: "a"))
+        done.status = .proven(at: t0)
+        let copy = TaxTask(title: "Math 7: Lesson 4&#160;", dueDate: t0, createdAt: t0.addingTimeInterval(60), source: .blackbaud(uid: "b"))
+        let other = TaxTask(title: "Science 7: Lab", dueDate: t0, createdAt: t0, source: .blackbaud(uid: "c"))
+        let manual = TaxTask(title: "Math 7: Lesson 4", dueDate: t0, createdAt: t0)
+        let r = Blackbaud.mergeDuplicates([copy, done, other, manual], state: BlackbaudState())
+        expect(r.removed.map(\.id) == [copy.id])
+        expect(r.tasks.count == 3)
+        // Two copies that both have proof are both kept.
+        var proofA = copy
+        proofA.proofs = [ProofSubmission(submittedAt: t0, note: "", attachments: [])]
+        expect(Blackbaud.mergeDuplicates([proofA, done], state: BlackbaudState()).removed.isEmpty)
+    }
+}
+
 let checks: [(String, () -> Void)] = [
+    ("ChangingUIDs.newUIDsDontDuplicate", { ChangingUIDs().newUIDsDontDuplicate() }),
+    ("ChangingUIDs.deletedStaysDeletedAfterNewUID", { ChangingUIDs().deletedStaysDeletedAfterNewUID() }),
+    ("ChangingUIDs.weeklyRepeatsGetTheirOwnTasks", { ChangingUIDs().weeklyRepeatsGetTheirOwnTasks() }),
+    ("ChangingUIDs.teacherMovesDateWithNewUID", { ChangingUIDs().teacherMovesDateWithNewUID() }),
+    ("ChangingUIDs.oldDuplicatesMerge", { ChangingUIDs().oldDuplicatesMerge() }),
     ("RealFeedMatching.similarTitlesPickTheExactOne", { RealFeedMatching().similarTitlesPickTheExactOne() }),
     ("RealFeedMatching.classDecidesBetweenSameTitles", { RealFeedMatching().classDecidesBetweenSameTitles() }),
     ("RealFeedMatching.titlesWithColonsSplitOnce", { RealFeedMatching().titlesWithColonsSplitOnce() }),

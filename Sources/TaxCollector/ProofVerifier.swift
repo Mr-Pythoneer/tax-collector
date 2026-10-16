@@ -11,6 +11,18 @@ enum ProofVerifier {
 
     static let timeout: TimeInterval = 180
 
+    /// Where the `claude` tool is. Homebrew, the official installer and npm each put it somewhere else,
+    /// so when the setting is still the default, look in the usual places.
+    static func claudePath(_ settings: Settings) -> String? {
+        let home = NSHomeDirectory()
+        var candidates = [settings.claudePath]
+        if settings.claudePath == Settings().claudePath {
+            candidates += ["/usr/local/bin/claude", "\(home)/.local/bin/claude", "\(home)/.claude/local/claude",
+                           "\(home)/.npm-global/bin/claude", "/opt/homebrew/bin/claude"]
+        }
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
     static func verify(task: TaxTask, submission: ProofSubmission, folder: URL, settings: Settings,
                        tokenFile: URL) async -> Outcome {
         await withCheckedContinuation { cont in
@@ -25,12 +37,12 @@ enum ProofVerifier {
     static func authStatus(settings: Settings, tokenFile: URL) async -> String {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .utility).async {
-                guard FileManager.default.isExecutableFile(atPath: settings.claudePath) else {
-                    cont.resume(returning: "Claude CLI not found at \(settings.claudePath)")
+                guard let path = claudePath(settings) else {
+                    cont.resume(returning: "Not installed")
                     return
                 }
                 let p = Process()
-                p.executableURL = URL(fileURLWithPath: settings.claudePath)
+                p.executableURL = URL(fileURLWithPath: path)
                 p.arguments = ["auth", "status"]
                 p.environment = environment(tokenFile: tokenFile)
                 let out = Pipe()
@@ -55,15 +67,15 @@ enum ProofVerifier {
 
     private static func run(task: TaxTask, submission: ProofSubmission, folder: URL, settings: Settings,
                             tokenFile: URL) -> Outcome {
-        guard FileManager.default.isExecutableFile(atPath: settings.claudePath) else {
-            return Outcome(verdict: .error, reason: "Couldn't find the Claude CLI at \(settings.claudePath).")
+        guard let path = claudePath(settings) else {
+            return Outcome(verdict: .error, reason: "The Claude command-line tool isn't installed on this Mac.")
         }
         // Read only sees what we name, so give it absolute paths.
         let files = submission.attachments.map { folder.appendingPathComponent($0).path }
         let prompt = Auditor.prompt(task: task, note: submission.note, files: files, now: submission.submittedAt)
 
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: settings.claudePath)
+        p.executableURL = URL(fileURLWithPath: path)
         p.arguments = [
             "-p", prompt,
             "--output-format", "json",
