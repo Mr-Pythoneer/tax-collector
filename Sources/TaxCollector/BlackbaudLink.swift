@@ -7,7 +7,7 @@ import WebKit
 /// never passes through Tax Collector. The session cookie stays in this app's web storage, and
 /// requests are made from inside a Blackbaud page, exactly like the website makes them.
 @MainActor
-final class BlackbaudLink: NSObject, WKNavigationDelegate, NSWindowDelegate {
+final class BlackbaudLink: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate {
     enum CallError: Error {
         case noHost
         case pageDidNotLoad
@@ -22,12 +22,20 @@ final class BlackbaudLink: NSObject, WKNavigationDelegate, NSWindowDelegate {
 
     private(set) var host: String?
     var onSignedInChange: (Bool) -> Void = { _ in }
+    /// Where the sign-in is kept between launches (readable only by your user account). Blackbaud's
+    /// sign-in is a browser-session cookie, which web storage drops when the app quits; without this
+    /// you'd be signed out after every restart.
+    var sessionFile: URL?
+    private var sessionRestored = false
 
     private var worker: WKWebView?
     private var workerLoaded = false
     private var loadWaiters: [CheckedContinuation<Bool, Never>] = []
     private var signInWindow: NSWindow?
     private var signInView: WKWebView?
+    private var signInWatch: Task<Void, Never>?
+    /// Windows a sign-in page opened itself (Microsoft and Google sometimes use pop-ups).
+    private var popups: [WKWebView: NSWindow] = [:]
 
     /// The school's address comes from the feed link (`yourschool.myschoolapp.com`).
     func configure(feedURL: URL?) {
@@ -48,10 +56,11 @@ final class BlackbaudLink: NSObject, WKNavigationDelegate, NSWindowDelegate {
     private static let safariAgent =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
 
-    private func makeWebView(_ size: NSSize) -> WKWebView {
-        let web = WKWebView(frame: NSRect(origin: .zero, size: size), configuration: configuration())
+    private func makeWebView(_ size: NSSize, configuration: WKWebViewConfiguration? = nil) -> WKWebView {
+        let web = WKWebView(frame: NSRect(origin: .zero, size: size), configuration: configuration ?? self.configuration())
         web.customUserAgent = Self.safariAgent
         web.navigationDelegate = self
+        web.uiDelegate = self
         return web
     }
 
@@ -77,13 +86,59 @@ final class BlackbaudLink: NSObject, WKNavigationDelegate, NSWindowDelegate {
         signInView = web
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
+        // Blackbaud's own sign-in can finish without a full page load, so keep asking while the window is open.
+        signInWatch?.cancel()
+        signInWatch = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard let self, self.signInWindow != nil else { return }
+                if await self.isSignedIn() {
+                    self.signInWindow?.close()
+                    return
+                }
+            }
+        }
     }
 
     func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        if let entry = popups.first(where: { $0.value === window }) {
+            popups[entry.key] = nil
+            return
+        }
+        guard window === signInWindow else { return }
+        signInWatch?.cancel()
+        signInWatch = nil
         signInView?.navigationDelegate = nil
+        signInView?.uiDelegate = nil
         signInView = nil
         signInWindow = nil
+        for (_, popup) in popups { popup.close() }
         Task { self.onSignedInChange(await self.isSignedIn()) }
+    }
+
+    // MARK: Pop-ups
+
+    /// A sign-in page asked for a new window. Give it a real one, so the page that opened it can still talk to it.
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        let width = windowFeatures.width.map { CGFloat(truncating: $0) } ?? 520
+        let height = windowFeatures.height.map { CGFloat(truncating: $0) } ?? 640
+        let popup = makeWebView(NSSize(width: width, height: height), configuration: configuration)
+        let window = NSWindow(contentRect: popup.frame, styleMask: [.titled, .closable, .resizable],
+                              backing: .buffered, defer: false)
+        window.title = "Sign in"
+        window.contentView = popup
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.center()
+        popups[popup] = window
+        window.makeKeyAndOrderFront(nil)
+        return popup
+    }
+
+    func webViewDidClose(_ webView: WKWebView) {
+        popups[webView]?.close()
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -123,6 +178,7 @@ final class BlackbaudLink: NSObject, WKNavigationDelegate, NSWindowDelegate {
     private func readyWorker() async throws -> WKWebView {
         guard let host, let url = URL(string: "https://\(host)/app/student") else { throw CallError.noHost }
         if let worker, workerLoaded { return worker }
+        if worker == nil { await restoreSession() }
         let web = worker ?? makeWebView(NSSize(width: 800, height: 600))
         if worker == nil {
             worker = web
@@ -163,10 +219,59 @@ final class BlackbaudLink: NSObject, WKNavigationDelegate, NSWindowDelegate {
         }
     }
 
-    /// Asks Blackbaud who's signed in. Any failure counts as signed out.
+    /// Asks Blackbaud who's signed in. Any failure counts as signed out. While signed in, the session is
+    /// saved again, since Blackbaud renews it as you use it.
     func isSignedIn() async -> Bool {
         guard host != nil, let r = try? await call("GET", BlackbaudAPI.contextPath) else { return false }
-        return BlackbaudAPI.isSignedIn(r.status, r.json)
+        let signedIn = BlackbaudAPI.isSignedIn(r.status, r.json)
+        if signedIn { await saveSession() }
+        return signedIn
+    }
+
+    // MARK: Keeping the sign-in
+
+    private func isSchoolCookie(_ cookie: HTTPCookie) -> Bool {
+        guard let host = host?.lowercased() else { return false }
+        let domain = cookie.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        return host == domain || host.hasSuffix("." + domain)
+            || domain.hasSuffix("myschoolapp.com") || domain.hasSuffix("blackbaud.com")
+    }
+
+    private func saveSession() async {
+        guard let sessionFile else { return }
+        let cookies = await WKWebsiteDataStore.default().httpCookieStore.allCookies().filter(isSchoolCookie)
+        let list: [[String: Any]] = cookies.compactMap { cookie in
+            guard let properties = cookie.properties else { return nil }
+            var plist: [String: Any] = [:]
+            for (key, value) in properties {
+                switch value {
+                case let url as URL: plist[key.rawValue] = url.absoluteString
+                case is String, is Date, is NSNumber: plist[key.rawValue] = value
+                default: continue
+                }
+            }
+            return plist
+        }
+        guard !list.isEmpty,
+              let data = try? PropertyListSerialization.data(fromPropertyList: list, format: .binary, options: 0)
+        else { return }
+        try? FileManager.default.removeItem(at: sessionFile)
+        FileManager.default.createFile(atPath: sessionFile.path, contents: data, attributes: [.posixPermissions: 0o600])
+    }
+
+    /// Puts the saved sign-in back before the first request of this launch.
+    private func restoreSession() async {
+        guard !sessionRestored else { return }
+        sessionRestored = true
+        guard let sessionFile, let data = try? Data(contentsOf: sessionFile),
+              let list = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [[String: Any]]
+        else { return }
+        let store = WKWebsiteDataStore.default().httpCookieStore
+        for item in list {
+            var properties: [HTTPCookiePropertyKey: Any] = [:]
+            for (key, value) in item { properties[HTTPCookiePropertyKey(key)] = value }
+            if let cookie = HTTPCookie(properties: properties) { await store.setCookie(cookie) }
+        }
     }
 
     /// Forget the session (sign out of Blackbaud inside Tax Collector).
@@ -178,6 +283,7 @@ final class BlackbaudLink: NSObject, WKNavigationDelegate, NSWindowDelegate {
             return host.hasSuffix(record.displayName) || record.displayName.contains("blackbaud")
         }
         await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), for: school)
+        if let sessionFile { try? FileManager.default.removeItem(at: sessionFile) }
         worker = nil
         workerLoaded = false
         onSignedInChange(false)

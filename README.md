@@ -51,6 +51,8 @@ TAXCOLLECTOR_DATA_DIR=/tmp/tc-test TAXCOLLECTOR_DRY_RUN=1 "build/Tax Collector.a
 
 - `TAXCOLLECTOR_DATA_DIR` uses separate data, skips the single-instance check, and lets you quit normally.
 - `TAXCOLLECTOR_DRY_RUN=1` logs which apps would be closed instead of closing them.
+- `TAXCOLLECTOR_BLACKBAUD_PROBE=1` opens the Blackbaud sign-in if needed, then writes `blackbaud-probe.json`: a read-only report of what Blackbaud's endpoints return and which assignment each imported task matches. It saves only the fields the app uses, never cookies or tokens. Run this first when Blackbaud changes something.
+- `TAXCOLLECTOR_TEST_LAST_CHECK=<part of a title>` opens that paid task's last check, ticks everything and confirms it, just as your clicks would. **This really marks the assignment Completed in Blackbaud.**
 - To test Blackbaud import without a real feed, put `"blackbaudURL": "file:///path/to/sample.ics"` in that folder's `settings.json`. The app polls it at launch.
 
 ## Data
@@ -59,6 +61,7 @@ Everything lives in `~/Library/Application Support/TaxCollector/`:
 
 - `tasks.json` and `settings.json` (which holds the Blackbaud feed link)
 - `blackbaud.json`, which holds what the feed last said about each imported assignment and which ones you deleted
+- `blackbaud-session.plist`, which holds your Blackbaud sign-in so it survives restarts. It's readable only by your account, and **Sign out** deletes it.
 - `guardian.json`, which holds only a salted PBKDF2 hash of the code
 - `proofs/<task>/<submission>/`, which holds your files plus the auditor's raw answer
 - `events.log`

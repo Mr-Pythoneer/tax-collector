@@ -95,7 +95,14 @@ struct LastCheckView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if let task = model.task(taskID) {
-                Text(task.title).font(Theme.title(20))
+                let parts = Agenda.courseAndTitle(task)
+                VStack(alignment: .leading, spacing: 4) {
+                    if let course = parts.course { CourseTag(course: course) }
+                    Text(parts.title)
+                        .font(Theme.title(20))
+                        .foregroundStyle(Theme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 LastCheckPanel(taskID: taskID)
             }
             HStack {

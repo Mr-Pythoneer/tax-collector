@@ -96,6 +96,29 @@ enum BlackbaudAPI {
         return []
     }
 
+    /// Sets one assignment's status the way the student site does, then reads it back.
+    /// Returns nil on success, or why it failed.
+    @MainActor
+    static func setStatus(_ indexID: Int, to status: Int, around due: Date, link: BlackbaudLink) async throws -> String? {
+        // Some schools want the page's security token on changes. Send it when Blackbaud gives one.
+        var headers: [String: String] = [:]
+        if let csrf = try? await link.call("GET", csrfPath), csrf.status == 200 {
+            let token = (csrf.json as? String ?? csrf.body)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"").union(.whitespacesAndNewlines))
+            if !token.isEmpty, !token.contains("<"), !token.contains("\n") { headers["RequestVerificationToken"] = token }
+        }
+        let r = try await link.call("POST", statusPath, json: ["assignmentIndexId": indexID, "assignmentStatus": status],
+                                    headers: headers)
+        guard (200..<300).contains(r.status) else { return "Blackbaud refused the change (HTTP \(r.status))." }
+
+        // Don't take the POST's word for it: read the status back.
+        let after = try await assignments(around: due, link: link).first { $0.indexID == indexID }
+        if let now = after?.status, now != status {
+            return "Blackbaud accepted the request but still shows a different status."
+        }
+        return nil
+    }
+
     /// Finds the assignment behind `task` and marks it Completed. Returns nil on success, or why it failed.
     @MainActor
     static func markCompleted(_ task: TaxTask, link: BlackbaudLink) async -> String? {
@@ -112,23 +135,7 @@ enum BlackbaudAPI {
             }
             if match.status == completedStatus { return nil }
 
-            // Some schools want the page's security token on changes. Send it when Blackbaud gives one.
-            var headers: [String: String] = [:]
-            if let csrf = try? await link.call("GET", csrfPath), csrf.status == 200 {
-                let token = (csrf.json as? String ?? csrf.body).trimmingCharacters(in: CharacterSet(charactersIn: "\"").union(.whitespacesAndNewlines))
-                if !token.isEmpty, !token.contains("<"), !token.contains("\n") { headers["RequestVerificationToken"] = token }
-            }
-            let r = try await link.call("POST", statusPath,
-                                        json: ["assignmentIndexId": match.indexID, "assignmentStatus": completedStatus],
-                                        headers: headers)
-            guard (200..<300).contains(r.status) else { return "Blackbaud refused the change (HTTP \(r.status))." }
-
-            // Don't take the POST's word for it: read the status back.
-            let after = try await assignments(around: task.dueDate, link: link).first { $0.indexID == match.indexID }
-            if let status = after?.status, status != completedStatus {
-                return "Blackbaud accepted the request but still shows it as not completed."
-            }
-            return nil
+            return try await setStatus(match.indexID, to: completedStatus, around: task.dueDate, link: link)
         } catch {
             return "Couldn't reach Blackbaud: \(error)"
         }

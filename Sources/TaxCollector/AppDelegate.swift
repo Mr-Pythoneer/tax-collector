@@ -39,8 +39,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         model.onPaid = { [weak self] task in
             self?.notify("Paid: \(task.title)", "The auditor accepted your proof.")
         }
+        blackbaudLink.sessionFile = model.store.dir.appendingPathComponent("blackbaud-session.plist")
         blackbaudLink.configure(feedURL: model.feedURL)
-        blackbaudLink.onSignedInChange = { [weak self] in self?.model.blackbaudSignedIn = $0 }
+        // Testing aid: TAXCOLLECTOR_BLACKBAUD_PROBE=1 opens the sign-in window and writes a read-only report.
+        let probe = env["TAXCOLLECTOR_BLACKBAUD_PROBE"] == "1"
+        var probed = false
+        let runProbe = { [weak self] in
+            guard let self, probe, !probed else { return }
+            probed = true
+            Task {
+                await BlackbaudProbe.run(link: self.blackbaudLink, tasks: self.model.tasks,
+                                         to: self.model.store.dir.appendingPathComponent("blackbaud-probe.json"))
+                self.model.store.log("PROBE wrote blackbaud-probe.json")
+            }
+        }
+        blackbaudLink.onSignedInChange = { [weak self] signedIn in
+            self?.model.blackbaudSignedIn = signedIn
+            if signedIn { runProbe() }
+        }
         model.onBlackbaudSignIn = { [weak self] in
             guard let self else { return }
             self.blackbaudLink.configure(feedURL: self.model.feedURL)
@@ -58,7 +74,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             return failure
         }
         if model.feedURL != nil {
-            Task { self.model.blackbaudSignedIn = await self.blackbaudLink.isSignedIn() }
+            Task {
+                let signedIn = await self.blackbaudLink.isSignedIn()
+                self.model.blackbaudSignedIn = signedIn
+                if probe {
+                    if signedIn { runProbe() } else { self.blackbaudLink.showSignIn() }
+                }
+                if signedIn, let target = env["TAXCOLLECTOR_TEST_LAST_CHECK"], !target.isEmpty {
+                    self.runLastCheckTest(titleContaining: target)
+                }
+            }
         }
         model.onImported = { [weak self] added in
             guard let self, let next = added.min(by: { $0.dueDate < $1.dueDate }) else { return }
@@ -87,6 +112,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         model.start()
         let startedAtLogin = CommandLine.arguments.contains("--launchd")
         if model.guardian == nil || !startedAtLogin { showMain() }
+    }
+
+    /// Testing aid, only with `TAXCOLLECTOR_TEST_LAST_CHECK=<part of a task title>`: opens that task's
+    /// last check, then does what your clicks would (tick every item, confirm) with pauses for screenshots.
+    private func runLastCheckTest(titleContaining target: String) {
+        guard let task = model.tasks.first(where: { $0.title.localizedCaseInsensitiveContains(target) && $0.needsLastCheck })
+        else {
+            model.store.log("TEST no paid Blackbaud task matching \"\(target)\" needs a last check")
+            return
+        }
+        model.store.log("TEST last check for \"\(task.title)\"")
+        showMain()
+        router.mainSheet = .lastCheck(task.id)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
+            guard let self else { return }
+            for item in self.model.task(task.id)?.checklist ?? [] {
+                self.model.setChecklistItem(task.id, item: item.id, done: true)
+            }
+            self.model.store.log("TEST ticked every item")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+                self?.model.confirmLastCheck(task.id)
+                self?.model.store.log("TEST pressed I've done all of this")
+            }
+        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

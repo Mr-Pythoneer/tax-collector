@@ -704,7 +704,49 @@ struct AgendaRules {
     }
 }
 
+struct RealFeedMatching {
+    // Shapes taken from a real school's feed and assignment list.
+    let pe = "Physical Education - PHE7 - 7B"
+    var list: [BlackbaudListedAssignment] {
+        [
+            BlackbaudListedAssignment(indexID: 90438812, title: "B. Cross Country Run", course: pe, due: t0, status: Int(Int32.min)),
+            BlackbaudListedAssignment(indexID: 90438830, title: "Cross Country Run", course: pe, due: t0, status: Int(Int32.min)),
+            BlackbaudListedAssignment(indexID: 90438848, title: "D. Cross Country Run", course: pe, due: t0, status: Int(Int32.min)),
+            BlackbaudListedAssignment(indexID: 90339902, title: "Lesson 2", course: "Mathematics - MTHX - MS - 2", due: t0, status: -1),
+            BlackbaudListedAssignment(indexID: 90400001, title: "Lesson 2", course: "Science 7- SCI7 - 7B", due: t0, status: -1),
+        ]
+    }
+    let guid = "9463ec1f-94af-412a-9d57-9a2b015afa99"
+
+    func similarTitlesPickTheExactOne() {
+        let evening = t0.addingTimeInterval(-20 * 3600)
+        expect(BlackbaudMatch.find(feedUID: guid, title: "\(pe): Cross Country Run", due: evening, in: list)?.indexID == 90438830)
+        expect(BlackbaudMatch.find(feedUID: guid, title: "\(pe): D. Cross Country Run", due: evening, in: list)?.indexID == 90438848)
+        expect(BlackbaudMatch.find(feedUID: guid, title: "\(pe): B. Cross Country Run", due: evening, in: list)?.indexID == 90438812)
+    }
+
+    func classDecidesBetweenSameTitles() {
+        expect(BlackbaudMatch.find(feedUID: guid, title: "Science 7- SCI7 - 7B: Lesson 2", due: t0, in: list)?.indexID == 90400001)
+        expect(BlackbaudMatch.find(feedUID: guid, title: "Mathematics - MTHX - MS - 2: Lesson 2", due: t0, in: list)?.indexID == 90339902)
+    }
+
+    func titlesWithColonsSplitOnce() {
+        let s = BlackbaudMatch.split("Mathematics - MTHX - MS - 2: Tentative Test Date: Fractions")
+        expect(s.course == "Mathematics - MTHX - MS - 2")
+        expect(s.name == "Tentative Test Date: Fractions")
+    }
+
+    func guidDigitsNeverCountAsIDs() {
+        let tricky = [BlackbaudListedAssignment(indexID: 9463, title: "Other thing", course: pe, due: t0)]
+        expect(BlackbaudMatch.find(feedUID: guid, title: "\(pe): Cross Country Run", due: t0, in: tricky) == nil)
+    }
+}
+
 let checks: [(String, () -> Void)] = [
+    ("RealFeedMatching.similarTitlesPickTheExactOne", { RealFeedMatching().similarTitlesPickTheExactOne() }),
+    ("RealFeedMatching.classDecidesBetweenSameTitles", { RealFeedMatching().classDecidesBetweenSameTitles() }),
+    ("RealFeedMatching.titlesWithColonsSplitOnce", { RealFeedMatching().titlesWithColonsSplitOnce() }),
+    ("RealFeedMatching.guidDigitsNeverCountAsIDs", { RealFeedMatching().guidDigitsNeverCountAsIDs() }),
     ("AgendaRules.groupsAndRanks", { AgendaRules().groupsAndRanks() }),
     ("AgendaRules.blackbaudTitlesSplit", { AgendaRules().blackbaudTitlesSplit() }),
     ("AgendaRules.colorsAreStable", { AgendaRules().colorsAreStable() }),
