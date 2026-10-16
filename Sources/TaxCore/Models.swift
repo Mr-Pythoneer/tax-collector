@@ -22,15 +22,18 @@ public struct ProofSubmission: Codable, Identifiable, Equatable, Sendable {
     /// nil while the auditor is still checking.
     public var verdict: Verdict?
     public var reason: String
+    /// When you last asked for it to be checked again, after a check that couldn't finish.
+    public var recheckedAt: Date?
 
     public init(id: UUID = UUID(), submittedAt: Date, note: String, attachments: [String],
-                verdict: Verdict? = nil, reason: String = "") {
+                verdict: Verdict? = nil, reason: String = "", recheckedAt: Date? = nil) {
         self.id = id
         self.submittedAt = submittedAt
         self.note = note
         self.attachments = attachments
         self.verdict = verdict
         self.reason = reason
+        self.recheckedAt = recheckedAt
     }
 
     public var isAccepted: Bool { verdict == .accepted || verdict == .guardianApproved }
@@ -144,9 +147,11 @@ public struct TaxTask: Codable, Identifiable, Equatable, Sendable {
     }
 
     /// A proof sent in before the deadline that the auditor hasn't ruled on yet.
-    /// While one exists the task doesn't count as overdue, so a slow check can't make you late.
+    /// While one exists the task doesn't count as overdue (for a few minutes at most, see
+    /// `LockPolicy.checkGrace`), so a slow check can't make you late. Checking again after the
+    /// deadline doesn't count: it can't lift a lock that has already started.
     public var hasCheckInFlightFromBeforeDue: Bool {
-        proofs.contains { $0.verdict == nil && $0.submittedAt <= dueDate }
+        proofs.contains { $0.verdict == nil && $0.submittedAt <= dueDate && ($0.recheckedAt ?? $0.submittedAt) <= dueDate }
             || (extensions ?? []).contains { $0.decision == nil && $0.requestedAt <= dueDate }
     }
 }

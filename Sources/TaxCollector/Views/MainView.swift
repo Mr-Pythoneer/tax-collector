@@ -351,6 +351,9 @@ struct TaskRow: View {
         .opensDetails(task.id)
         .contextMenu {
             Button("Show Details…") { model.onOpenDetails(task.id) }
+            if isChecking, let latest {
+                Button("Cancel Check") { model.cancelCheck(taskID: task.id, submissionID: latest.id) }
+            }
             Divider()
             if task.isPending { Button("Edit…") { router.mainSheet = .edit(task.id) } }
             if task.isPending && task.dueDate > model.now {

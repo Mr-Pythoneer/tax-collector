@@ -38,6 +38,31 @@ struct LockRule {
         expect(LockPolicy.state(tasks: [task(due: 0)], overrideUntil: nil, now: t0).isLocked)
     }
 
+    func checkInFlightHoldsOffTheLockOnlyBriefly() {
+        // Proof sent before the deadline, Claude still checking after it.
+        var t = task(due: -60)
+        t.proofs = [ProofSubmission(submittedAt: t0.addingTimeInterval(-120), note: "", attachments: [])]
+        expect(!LockPolicy.isOverdue(t, now: t0))
+        expect(LockPolicy.isOverdue(t, now: t.dueDate.addingTimeInterval(LockPolicy.checkGrace + 1)))
+        // Sent after the deadline: no grace at all.
+        t.proofs = [ProofSubmission(submittedAt: t0.addingTimeInterval(-30), note: "", attachments: [])]
+        expect(LockPolicy.isOverdue(t, now: t0))
+    }
+
+    func recheckAfterDeadlineDoesNotLift() {
+        var t = task(due: -60)
+        t.proofs = [ProofSubmission(submittedAt: t0.addingTimeInterval(-120), note: "", attachments: [],
+                                    recheckedAt: t0.addingTimeInterval(-30))]
+        expect(LockPolicy.isOverdue(t, now: t0))
+        t.proofs[0].recheckedAt = t0.addingTimeInterval(-90)
+        expect(!LockPolicy.isOverdue(t, now: t0))
+        // The new field survives a save, and files without it still load.
+        let data = try? JSONEncoder().encode(t.proofs[0])
+        expect(data.flatMap { try? JSONDecoder().decode(ProofSubmission.self, from: $0) } == t.proofs[0])
+        let old = #"{"id":"4D1C8B0E-7F4A-4C11-9E2B-1A2B3C4D5E6F","submittedAt":0,"note":"","attachments":[],"reason":""}"#
+        expect((try? JSONDecoder().decode(ProofSubmission.self, from: Data(old.utf8)))?.recheckedAt == nil)
+    }
+
     func provenAndExcusedDoNotLock() {
         let tasks = [task(due: -60, status: .proven(at: t0.addingTimeInterval(-120))),
                      task(due: -60, status: .excused(at: t0))]
@@ -977,6 +1002,8 @@ let checks: [(String, () -> Void)] = [
     ("LockRule.nothingDueMeansUnlocked", { LockRule().nothingDueMeansUnlocked() }),
     ("LockRule.overduePendingLocks", { LockRule().overduePendingLocks() }),
     ("LockRule.dueExactlyNowLocks", { LockRule().dueExactlyNowLocks() }),
+    ("LockRule.checkInFlightHoldsOffTheLockOnlyBriefly", { LockRule().checkInFlightHoldsOffTheLockOnlyBriefly() }),
+    ("LockRule.recheckAfterDeadlineDoesNotLift", { LockRule().recheckAfterDeadlineDoesNotLift() }),
     ("LockRule.provenAndExcusedDoNotLock", { LockRule().provenAndExcusedDoNotLock() }),
     ("LockRule.penaltyLocksUntilItEnds", { LockRule().penaltyLocksUntilItEnds() }),
     ("LockRule.guardianOverrideUnlocksUntilItExpires", { LockRule().guardianOverrideUnlocksUntilItExpires() }),

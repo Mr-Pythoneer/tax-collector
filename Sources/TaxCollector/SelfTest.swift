@@ -157,6 +157,75 @@ enum SelfTest {
         check("proof: a missing Claude is reported, task stays due",
               broken?.isPending == true && broken?.proofs.last?.verdict == .error,
               broken?.proofs.last?.reason ?? "")
+        // Cancelling a check: the proof counts for nothing, and Claude's late answer is ignored
+        func slowClaude(_ name: String, _ inner: String) -> String {
+            let path = fakeClaude(name, inner)
+            let script = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+            FileManager.default.createFile(atPath: path, contents: Data(script.replacingOccurrences(of: "#!/bin/sh\n", with: "#!/bin/sh\nsleep 3\n").utf8),
+                                           attributes: [.posixPermissions: 0o755])
+            return path
+        }
+        func pause(_ seconds: Double) async { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+        let slowAccept = slowClaude("claude-slow-accept", #"{"verdict":"accept","reason":"Fine."}"#)
+        model.settings.claudePath = slowAccept
+        model.addTask(title: "Proof cancelled", details: "Problems 1-10", due: Date().addingTimeInterval(86400))
+        if let c = newest("Proof cancelled") {
+            model.submitProof(taskID: c.id, note: "done", files: [proofFile])
+            let sid = model.task(c.id)?.proofs.last?.id
+            check("cancel: the check is running", sid.map { model.checking.contains($0) } == true)
+            if let sid { model.cancelCheck(taskID: c.id, submissionID: sid) }
+            check("cancel: the proof is withdrawn and the task stays due",
+                  model.task(c.id)?.proofs.isEmpty == true && model.task(c.id)?.isPending == true && model.checking.isEmpty)
+            await pause(4.5)
+            check("cancel: Claude's late answer doesn't pass it",
+                  model.task(c.id)?.isPending == true && model.task(c.id)?.proofs.isEmpty == true)
+        }
+
+        model.settings.claudePath = dir.appendingPathComponent("no-such-claude").path
+        model.addTask(title: "Proof recheck cancelled", details: "", due: Date().addingTimeInterval(86400))
+        if let r = newest("Proof recheck cancelled") {
+            model.submitProof(taskID: r.id, note: "done", files: [proofFile])
+            _ = await wait { model.task(r.id)?.proofs.last?.verdict != nil }
+            model.settings.claudePath = slowAccept
+            if let sid = model.task(r.id)?.proofs.last?.id {
+                model.recheck(taskID: r.id, submissionID: sid)
+                model.cancelCheck(taskID: r.id, submissionID: sid)
+            }
+            await pause(4.5)
+            let proof = model.task(r.id)?.proofs.last
+            check("cancel: a cancelled re-check goes back to couldn't check, not passed",
+                  proof?.verdict == .error && proof?.reason == "You cancelled the check." && model.task(r.id)?.isPending == true,
+                  "\(String(describing: proof?.verdict)) \(proof?.reason ?? "")")
+        }
+
+        model.settings.claudePath = slowClaude("claude-slow-reject", #"{"verdict":"reject","reason":"Too late to count."}"#)
+        model.addTask(title: "Proof approved meanwhile", details: "", due: Date().addingTimeInterval(86400))
+        if let g = newest("Proof approved meanwhile") {
+            model.submitProof(taskID: g.id, note: "done", files: [proofFile])
+            model.approveLatestProof(g.id)
+            await pause(4.5)
+            check("cancel: Claude's late answer doesn't undo a guardian's approval",
+                  model.task(g.id)?.proofs.last?.verdict == .guardianApproved && model.task(g.id)?.isPending == false)
+        }
+
+        // A guardian unlock keeps this from showing a real lock while it tests one.
+        model.settings.overrideUntil = Date().addingTimeInterval(120)
+        model.settings.claudePath = slowAccept
+        model.addTask(title: "Proof cancelled after the deadline", details: "", due: Date().addingTimeInterval(2))
+        if let l = newest("Proof cancelled after the deadline") {
+            model.submitProof(taskID: l.id, note: "done", files: [proofFile])
+            await pause(2.5)
+            model.tick()
+            check("cancel: a check sent before the deadline holds the lock off", !model.lock.overdue.contains { $0.id == l.id })
+            if let sid = model.task(l.id)?.proofs.last?.id { model.cancelCheck(taskID: l.id, submissionID: sid) }
+            check("cancel: cancelled after the deadline, it's overdue at once", model.lock.overdue.contains { $0.id == l.id })
+            await pause(3)
+            check("cancel: and Claude's late answer doesn't unlock it", model.lock.overdue.contains { $0.id == l.id })
+            _ = model.delete(l.id, guardianApproved: true)
+        }
+        model.settings.overrideUntil = nil
+        model.tick()
+
         model.settings.claudePath = realClaude
         for t in model.tasks where t.title.hasPrefix("Proof ") || t.title == "Written proof" { _ = model.delete(t.id, guardianApproved: true) }
 

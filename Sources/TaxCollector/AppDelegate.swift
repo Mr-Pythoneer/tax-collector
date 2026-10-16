@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private var setupAllowed = true
     /// A test copy with its own data folder. It mustn't change anything of the installed copy's, like window sizes.
     private var isTestCopy = false
+    /// The self-test locks and unlocks a scratch copy many times; none of that should reach your screen.
+    private var isSelfTest = false
 
     private static let showNotification = Notification.Name(AppModel.label + ".show")
 
@@ -32,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         canQuitFreely = dryRun || env["TAXCOLLECTOR_ALLOW_QUIT"] == "1"
         setupAllowed = !testing || env["TAXCOLLECTOR_TEST_SETUP"] == "1"
         isTestCopy = testing
+        isSelfTest = testing && env["TAXCOLLECTOR_SELFTEST"] == "1"
         if !testing { enforceSingleInstance() }
 
         model = AppModel(store: Store(), dryRun: dryRun)
@@ -371,7 +374,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     }
 
     private func showLockWindow() {
-        guard model.lock.isLocked else { return }
+        guard model.lock.isLocked, !isSelfTest else { return }
         if lockWindow == nil {
             lockWindow = makeWindow(title: "Tax Collector — Locked", size: NSSize(width: 620, height: 520),
                                     closable: false, toolbar: false, content: LockScreenView())
@@ -401,6 +404,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     /// A short message at the top of the screen that doesn't take focus.
     private func showBanner(_ text: String) {
+        guard !isSelfTest else { return }
         bannerHide?.cancel()
         banner?.orderOut(nil)
         guard let screen = NSScreen.main else { return }
@@ -547,7 +551,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     }
 
     private func notify(_ title: String, _ body: String) {
-        guard notificationsAllowed else { return }
+        guard notificationsAllowed, !isSelfTest else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body

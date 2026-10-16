@@ -236,6 +236,11 @@ struct AssignmentDetailView: View {
                             Text(Fmt.dateTime.string(from: proof.submittedAt)).foregroundStyle(.secondary)
                             Text(proof.attachments.isEmpty ? "written" : "\(proof.attachments.count) file\(proof.attachments.count == 1 ? "" : "s")")
                                 .foregroundStyle(.secondary)
+                            if proof.verdict == nil {
+                                Spacer()
+                                Button("Cancel Check") { model.cancelCheck(taskID: taskID, submissionID: proof.id) }
+                                    .controlSize(.small)
+                            }
                         }
                         .font(.callout)
                         if !proof.reason.isEmpty {

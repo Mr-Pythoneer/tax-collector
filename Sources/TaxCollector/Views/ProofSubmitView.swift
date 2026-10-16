@@ -30,6 +30,17 @@ struct ProofSubmitView: View {
         }
         .padding(20)
         .frame(width: 540)
+        .onAppear(perform: submitTestProof)
+    }
+
+    /// Testing aid: `TAXCOLLECTOR_TEST_PROOF_NOTE` (in a test copy only) types that note and submits it,
+    /// as if you had, so the checking screen can be looked at.
+    private func submitTestProof() {
+        let env = ProcessInfo.processInfo.environment
+        guard !(env["TAXCOLLECTOR_DATA_DIR"] ?? "").isEmpty, let testNote = env["TAXCOLLECTOR_TEST_PROOF_NOTE"],
+              !testNote.isEmpty, sentID == nil else { return }
+        note = testNote
+        send()
     }
 
     private func summary(_ task: TaxTask) -> some View {
@@ -158,6 +169,9 @@ struct ProofSubmitView: View {
                     ProgressView().controlSize(.small)
                     Text("Claude is checking your proof. This usually takes under a minute.")
                 }
+                Text("Closing this window doesn't stop the check. To take this proof back, click Cancel Check: it won't count, and the task stays due.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             case .accepted, .guardianApproved:
                 VStack(alignment: .leading, spacing: 6) {
                     Label("Accepted", systemImage: "checkmark.circle.fill")
@@ -203,6 +217,14 @@ struct ProofSubmitView: View {
                 }
                 if proof.verdict == .error {
                     Button("Try Again") { model.recheck(taskID: taskID, submissionID: proof.id) }
+                }
+                if proof.verdict == nil {
+                    Button("Cancel Check") {
+                        model.cancelCheck(taskID: taskID, submissionID: proof.id)
+                        // A withdrawn proof is gone, so go back to the form with your note and files still in it.
+                        if model.task(taskID)?.proofs.contains(where: { $0.id == proof.id }) != true { sentID = nil }
+                    }
+                    .keyboardShortcut(.cancelAction)
                 }
                 Spacer()
                 Button("Close", action: dismiss).keyboardShortcut(.defaultAction)

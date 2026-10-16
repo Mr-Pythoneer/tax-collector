@@ -130,6 +130,9 @@ private struct OverdueRow: View {
         .opensDetails(task.id)
         .contextMenu {
             Button("Show Details…") { model.onOpenDetails(task.id) }
+            if isChecking, let latest {
+                Button("Cancel Check") { model.cancelCheck(taskID: task.id, submissionID: latest.id) }
+            }
         }
     }
 }

@@ -291,8 +291,30 @@ final class AppModel {
               let si = tasks[ti].proofs.firstIndex(where: { $0.id == submissionID }) else { return }
         tasks[ti].proofs[si].verdict = nil
         tasks[ti].proofs[si].reason = ""
+        tasks[ti].proofs[si].recheckedAt = now
         save()
         runCheck(taskID: taskID, submissionID: submissionID)
+    }
+
+    /// Takes a proof back while Claude is still checking it. It counts for nothing: the task is still due,
+    /// and if the deadline has passed it's overdue right away. A first check is withdrawn completely, so you
+    /// can send something else; a re-check goes back to "couldn't check".
+    func cancelCheck(taskID: UUID, submissionID: UUID) {
+        guard let ti = tasks.firstIndex(where: { $0.id == taskID }),
+              let si = tasks[ti].proofs.firstIndex(where: { $0.id == submissionID }),
+              tasks[ti].proofs[si].verdict == nil else { return }
+        ProofVerifier.cancel(submissionID)
+        checking.remove(submissionID)
+        if tasks[ti].proofs[si].recheckedAt != nil {
+            tasks[ti].proofs[si].verdict = .error
+            tasks[ti].proofs[si].reason = "You cancelled the check."
+        } else {
+            tasks[ti].proofs.remove(at: si)
+            try? FileManager.default.removeItem(at: store.proofFolder(task: taskID, submission: submissionID))
+        }
+        save()
+        store.log("PROOF cancelled for \"\(tasks[ti].title)\" before Claude answered")
+        tick()
     }
 
     private func runCheck(taskID: UUID, submissionID: UUID) {
@@ -305,6 +327,10 @@ final class AppModel {
             let outcome = await ProofVerifier.verify(task: t, submission: submission, folder: folder,
                                                      settings: settings, tokenFile: tokenFile)
             self.checking.remove(submissionID)
+            // Cancelled, or approved by the guardian while Claude was busy: its answer doesn't count any more.
+            guard let proof = self.task(taskID)?.proofs.first(where: { $0.id == submissionID }), proof.verdict == nil else {
+                return
+            }
             self.record(verdict: outcome.verdict, reason: outcome.reason, checklist: outcome.checklist,
                         taskID: taskID, submissionID: submissionID)
         }
@@ -724,6 +750,7 @@ final class AppModel {
             tasks[i].proofs.append(ProofSubmission(submittedAt: now, note: "Approved by guardian", attachments: []))
         }
         let sid = tasks[i].proofs[tasks[i].proofs.count - 1].id
+        ProofVerifier.cancel(sid)
         checking.remove(sid)
         record(verdict: .guardianApproved, reason: "Approved by your guardian.", taskID: id, submissionID: sid)
     }

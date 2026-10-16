@@ -11,6 +11,18 @@ enum ProofVerifier {
 
     static let timeout: TimeInterval = 180
 
+    /// Checks still running, by submission, so you can cancel one.
+    private static let runningLock = NSLock()
+    nonisolated(unsafe) private static var running: [UUID: Process] = [:]
+
+    /// Stops the check of that submission, if it's still running. Its answer is ignored either way.
+    static func cancel(_ submissionID: UUID) {
+        runningLock.lock()
+        let process = running.removeValue(forKey: submissionID)
+        runningLock.unlock()
+        if let process, process.isRunning { process.terminate() }
+    }
+
     /// Where the `claude` tool is. Homebrew, the official installer and npm each put it somewhere else,
     /// so when the setting is still the default, look in the usual places.
     static func claudePath(_ settings: Settings) -> String? {
@@ -71,7 +83,7 @@ enum ProofVerifier {
         let files = submission.attachments.map { folder.appendingPathComponent($0).path }
         let prompt = Auditor.prompt(task: task, note: submission.note, files: files, now: submission.submittedAt)
         switch runClaude(prompt: prompt, rules: Auditor.systemRules, tools: "Read", folder: folder,
-                         settings: settings, tokenFile: tokenFile) {
+                         settings: settings, tokenFile: tokenFile, id: submission.id) {
         case let .failure(problem):
             return Outcome(verdict: .error, reason: problem.message)
         case let .success(data):
@@ -103,7 +115,7 @@ enum ProofVerifier {
 
     /// One run of `claude -p` in `folder`, with its answer saved there as auditor.json.
     private static func runClaude(prompt: String, rules: String, tools: String, folder: URL, settings: Settings,
-                                  tokenFile: URL) -> Result<Data, Problem> {
+                                  tokenFile: URL, id: UUID? = nil) -> Result<Data, Problem> {
         guard let path = claudePath(settings) else {
             return .failure(Problem(message: "The Claude command-line tool isn't installed on this Mac."))
         }
@@ -135,11 +147,21 @@ enum ProofVerifier {
         } catch {
             return .failure(Problem(message: "Couldn't start the Claude CLI: \(error.localizedDescription)"))
         }
+        if let id {
+            runningLock.lock()
+            running[id] = p
+            runningLock.unlock()
+        }
         let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: killer)
         let data = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
         killer.cancel()
+        if let id {
+            runningLock.lock()
+            running[id] = nil
+            runningLock.unlock()
+        }
         try? data.write(to: folder.appendingPathComponent("auditor.json"))
 
         if p.terminationReason == .uncaughtSignal {

@@ -30,6 +30,9 @@ public enum LockPolicy {
     public static let freezeWindow: TimeInterval = 24 * 3600
     /// Right after creating a task you can still fix typos, even if it's due soon.
     public static let creationGrace: TimeInterval = 5 * 60
+    /// The longest a check that started before the deadline holds the lock off once the deadline has
+    /// passed. Claude gets 3 minutes; if its answer still hasn't come, the task counts as overdue anyway.
+    public static let checkGrace: TimeInterval = 5 * 60
 
     public static func state(tasks: [TaxTask], overrideUntil: Date?, now: Date) -> LockState {
         let overdue = tasks.filter { isOverdue($0, now: now) }
@@ -39,7 +42,8 @@ public enum LockPolicy {
     }
 
     public static func isOverdue(_ task: TaxTask, now: Date) -> Bool {
-        task.isPending && task.dueDate <= now && !task.hasCheckInFlightFromBeforeDue
+        guard task.isPending, task.dueDate <= now else { return false }
+        return !(task.hasCheckInFlightFromBeforeDue && now < task.dueDate.addingTimeInterval(checkGrace))
     }
 
     public static func isInPenalty(_ task: TaxTask, now: Date) -> Bool {
