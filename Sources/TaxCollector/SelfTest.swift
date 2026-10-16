@@ -247,6 +247,92 @@ enum SelfTest {
         }
         check("feed: turning import off is allowed while nothing it imported is locked in", model.stopFeed() == .saved)
 
+        // Asking for more time, with fake Claude decisions
+        func fakeDecision(_ name: String, _ inner: String, wait: Int = 0) -> String {
+            let path = dir.appendingPathComponent(name).path
+            let body = #"{"type":"result","is_error":false,"result":"\#(inner.replacingOccurrences(of: "\"", with: "\\\""))"}"#
+            let script = "#!/bin/sh\nsleep \(wait)\ncat <<'EOF'\n\(body)\nEOF\n"
+            FileManager.default.createFile(atPath: path, contents: Data(script.utf8), attributes: [.posixPermissions: 0o755])
+            return path
+        }
+        func extended(_ title: String) -> TaxTask? { newest(title) }
+        let reason = "I have a fever of 39 and the nurse sent me home early today."
+
+        // Start with no record: requests are refused before Claude is even asked.
+        let savedTasks = model.tasks
+        model.tasks = []
+        model.addTask(title: "Too soon", details: "", due: Date().addingTimeInterval(7200))
+        if let t = newest("Too soon") {
+            check("more time: refused without a track record", model.extensionWhyNot(t)?.contains("at least") == true)
+            model.requestExtension(taskID: t.id, hours: 6, reason: reason)
+            check("more time: a refused request isn't recorded", model.task(t.id)?.extensions == nil)
+        }
+        // Build a record: five tasks proven on time.
+        for n in 1...5 {
+            model.addTask(title: "Record \(n)", details: "", due: Date().addingTimeInterval(3600))
+            if let t = newest("Record \(n)") { model.approveLatestProof(t.id) }
+        }
+        check("more time: five on-time tasks make you eligible", model.trackRecord.onTime == 5 && model.trackRecord.onTimeRate == 1)
+
+        model.settings.claudePath = fakeDecision("claude-grant-20", #"{"decision":"grant","hours":20,"reason":"Being sick is a real reason."}"#)
+        model.addTask(title: "Granted", details: "", due: Date().addingTimeInterval(7200))
+        if let t = extended("Granted") {
+            let before = t.dueDate
+            check("more time: allowed with a good record", model.extensionWhyNot(t) == nil)
+            model.requestExtension(taskID: t.id, hours: 6, reason: reason)
+            _ = await wait { model.task(t.id)?.extensions?.last?.decision != nil }
+            let after = model.task(t.id)
+            check("more time: granted, but never more than you asked",
+                  after?.extensions?.last?.hoursGranted == 6 && abs((after?.dueDate.timeIntervalSince(before) ?? 0) - 6 * 3600) < 1)
+            check("more time: one request per task", after.flatMap { model.extensionWhyNot($0) }?.contains("already asked") == true)
+        }
+
+        model.settings.claudePath = fakeDecision("claude-deny", #"{"decision":"deny","hours":0,"reason":"That's putting it off."}"#)
+        model.addTask(title: "Denied", details: "", due: Date().addingTimeInterval(7200))
+        if let t = extended("Denied") {
+            model.requestExtension(taskID: t.id, hours: 4, reason: "I was busy all evening and didn't get to it at all.")
+            _ = await wait { model.task(t.id)?.extensions?.last?.decision != nil }
+            check("more time: a denied request leaves the deadline alone",
+                  model.task(t.id)?.extensions?.last?.decision == .denied && model.task(t.id)?.dueDate == t.dueDate)
+        }
+
+        model.settings.claudePath = dir.appendingPathComponent("no-such-claude").path
+        model.addTask(title: "Unreachable", details: "", due: Date().addingTimeInterval(7200))
+        if let t = extended("Unreachable") {
+            model.requestExtension(taskID: t.id, hours: 4, reason: reason)
+            _ = await wait { model.task(t.id)?.extensions?.last?.decision != nil }
+            check("more time: if Claude can't answer, you can ask again",
+                  model.task(t.id)?.extensions?.last?.decision == .error && model.task(t.id).flatMap { model.extensionWhyNot($0) } == nil)
+        }
+
+        // A request just before the deadline holds off the lock until Claude answers.
+        model.settings.claudePath = fakeDecision("claude-slow-grant", #"{"decision":"grant","hours":2,"reason":"OK."}"#, wait: 4)
+        model.addTask(title: "Last minute", details: "", due: Date().addingTimeInterval(2))
+        if let t = extended("Last minute") {
+            model.requestExtension(taskID: t.id, hours: 2, reason: reason)
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            model.tick()
+            check("more time: no lock while Claude is still deciding", !model.lock.isLocked)
+            _ = await wait { model.task(t.id)?.extensions?.last?.decision != nil }
+            model.tick()
+            check("more time: once granted, still no lock", !model.lock.isLocked && model.task(t.id)?.extensions?.last?.decision == .granted)
+        }
+
+        // Two granted this week: the third is refused.
+        model.addTask(title: "Third", details: "", due: Date().addingTimeInterval(7200))
+        if let t = extended("Third") {
+            check("more time: at most two a week", model.extensionWhyNot(t)?.contains("2 extensions") == true)
+        }
+        model.setExtensionsEnabled(false)
+        if let t = extended("Third") {
+            check("more time: your guardian can turn it off", model.extensionWhyNot(t)?.contains("guardian") == true)
+        }
+        model.setExtensionsEnabled(true)
+        model.settings.claudePath = realClaude
+        model.tasks = savedTasks
+        model.store.saveTasks(model.tasks)
+        model.tick()
+
         // Settings
         model.setAppearance("dark")
         check("appearance: saved", model.store.loadSettings().appearance == "dark")

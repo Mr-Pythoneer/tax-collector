@@ -95,6 +95,16 @@ final class AppModel {
         }
         if interrupted { store.saveTasks(tasks) }
 
+        // Same for a request for more time that was waiting on Claude.
+        for t in tasks.indices {
+            for e in (tasks[t].extensions ?? []).indices where tasks[t].extensions?[e].decision == nil {
+                tasks[t].extensions?[e].decision = .error
+                tasks[t].extensions?[e].answer = "The request was interrupted. You can ask again."
+                interrupted = true
+            }
+        }
+        if interrupted { store.saveTasks(tasks) }
+
         // Older versions imported a second copy of everything whenever Blackbaud changed its UIDs.
         let merged = Blackbaud.mergeDuplicates(tasks, state: blackbaud)
         if !merged.removed.isEmpty {
@@ -438,6 +448,66 @@ final class AppModel {
         for note in result.notes { store.log("FEED \(note)") }
         if !result.added.isEmpty { onImported(result.added) }
         tick()
+    }
+
+    // MARK: More time
+
+    var trackRecord: TrackRecord { TrackRecord.of(tasks, now: now) }
+
+    /// nil when you can ask for more time on this task.
+    func extensionWhyNot(_ task: TaxTask) -> String? {
+        ExtensionPolicy.whyNot(task: task, record: trackRecord, enabled: settings.extensionsEnabled, now: now)
+    }
+
+    /// Asks Claude for up to 12 more hours. The limits are checked here, whatever Claude says.
+    func requestExtension(taskID: UUID, hours: Int, reason: String) {
+        guard let i = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        let task = tasks[i]
+        if let why = extensionWhyNot(task) {
+            store.log("EXTENSION refused for \"\(task.title)\": \(why)")
+            return
+        }
+        let asked = max(1, min(hours, ExtensionPolicy.maxHours))
+        let record = trackRecord
+        let request = Extension(requestedAt: now, hoursAsked: asked, reason: reason, previousDue: task.dueDate)
+        tasks[i].extensions = (tasks[i].extensions ?? []) + [request]
+        save()
+        store.log("EXTENSION asked for \(asked)h on \"\(task.title)\"")
+        let folder = store.dir.appendingPathComponent("extensions/\(task.id.uuidString)/\(request.id.uuidString)", isDirectory: true)
+        let settings = self.settings
+        let tokenFile = self.tokenFile
+        Task {
+            let (decision, granted, answer) = await ProofVerifier.decideExtension(
+                task: task, hours: asked, reason: reason, record: record, folder: folder, settings: settings, tokenFile: tokenFile)
+            self.recordExtension(taskID: taskID, requestID: request.id, decision: decision, granted: granted, answer: answer)
+        }
+    }
+
+    private func recordExtension(taskID: UUID, requestID: UUID, decision: ExtensionDecision, granted: Int, answer: String) {
+        guard let i = tasks.firstIndex(where: { $0.id == taskID }),
+              let e = tasks[i].extensions?.firstIndex(where: { $0.id == requestID }),
+              let request = tasks[i].extensions?[e] else { return }
+        let hours = decision == .granted ? ExtensionPolicy.clampedHours(granted: granted, asked: request.hoursAsked) : 0
+        tasks[i].extensions?[e].decision = hours > 0 ? .granted : (decision == .error ? .error : .denied)
+        tasks[i].extensions?[e].hoursGranted = hours
+        tasks[i].extensions?[e].answer = answer
+        if hours > 0 && tasks[i].isPending {
+            // Always from the deadline it had when you asked, so extensions can't stack.
+            tasks[i].dueDate = request.previousDue.addingTimeInterval(TimeInterval(hours) * 3600)
+            warned[taskID] = nil
+        }
+        save()
+        let word = hours > 0 ? "granted \(hours)h" : (decision == .error ? "couldn't be decided" : "denied")
+        store.log("EXTENSION \(word) for \"\(tasks[i].title)\": \(answer)")
+        tick()
+    }
+
+    func latestExtension(_ taskID: UUID) -> Extension? { task(taskID)?.extensions?.last }
+
+    func setExtensionsEnabled(_ enabled: Bool) {
+        settings.extensionsEnabled = enabled
+        store.saveSettings(settings)
+        store.log("GUARDIAN turned requests for more time \(enabled ? "on" : "off")")
     }
 
     // MARK: Appearance

@@ -49,6 +49,40 @@ public struct ChecklistItem: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
+/// Claude's answer to a request for more time.
+public enum ExtensionDecision: String, Codable, Equatable, Sendable {
+    case granted
+    case denied
+    case error
+}
+
+/// A request for more time on a task, and how it went.
+public struct Extension: Codable, Identifiable, Equatable, Sendable {
+    public var id: UUID
+    public var requestedAt: Date
+    public var hoursAsked: Int
+    /// Why the student asked.
+    public var reason: String
+    /// nil while Claude is deciding.
+    public var decision: ExtensionDecision?
+    public var hoursGranted: Int
+    /// Claude's explanation, to the student.
+    public var answer: String
+    public var previousDue: Date
+
+    public init(id: UUID = UUID(), requestedAt: Date, hoursAsked: Int, reason: String, decision: ExtensionDecision? = nil,
+                hoursGranted: Int = 0, answer: String = "", previousDue: Date) {
+        self.id = id
+        self.requestedAt = requestedAt
+        self.hoursAsked = hoursAsked
+        self.reason = reason
+        self.decision = decision
+        self.hoursGranted = hoursGranted
+        self.answer = answer
+        self.previousDue = previousDue
+    }
+}
+
 /// Where marking the assignment Completed in Blackbaud stands.
 public enum BlackbaudMark: Codable, Equatable, Sendable {
     case working
@@ -77,6 +111,8 @@ public struct TaxTask: Codable, Identifiable, Equatable, Sendable {
     /// When you confirmed every checklist item.
     public var lastCheckDoneAt: Date?
     public var blackbaudMark: BlackbaudMark?
+    /// Requests for more time. Optional so older saved tasks still load.
+    public var extensions: [Extension]?
 
     public init(id: UUID = UUID(), title: String, details: String = "", dueDate: Date,
                 createdAt: Date, source: TaskSource = .manual, status: TaskStatus = .pending,
@@ -111,6 +147,7 @@ public struct TaxTask: Codable, Identifiable, Equatable, Sendable {
     /// While one exists the task doesn't count as overdue, so a slow check can't make you late.
     public var hasCheckInFlightFromBeforeDue: Bool {
         proofs.contains { $0.verdict == nil && $0.submittedAt <= dueDate }
+            || (extensions ?? []).contains { $0.decision == nil && $0.requestedAt <= dueDate }
     }
 }
 
@@ -136,6 +173,8 @@ public struct Settings: Codable, Equatable, Sendable {
     public var appearance: String
     /// Set just before setup hands over to the background copy, so that copy can say it's ready.
     public var justSetUp: Bool
+    /// Whether you can ask Claude for up to 12 more hours. Only the guardian can change it.
+    public var extensionsEnabled: Bool
 
     public init() {
         penaltyMinutes = 30
@@ -151,6 +190,7 @@ public struct Settings: Codable, Equatable, Sendable {
         allDayDueMinutes = Blackbaud.defaultAllDayDueMinutes
         appearance = "light"
         justSetUp = false
+        extensionsEnabled = true
     }
 
     // Decode field by field so adding a setting later doesn't wipe saved ones.
@@ -170,5 +210,6 @@ public struct Settings: Codable, Equatable, Sendable {
         allDayDueMinutes = try c.decodeIfPresent(Int.self, forKey: .allDayDueMinutes) ?? allDayDueMinutes
         appearance = try c.decodeIfPresent(String.self, forKey: .appearance) ?? appearance
         justSetUp = try c.decodeIfPresent(Bool.self, forKey: .justSetUp) ?? false
+        extensionsEnabled = try c.decodeIfPresent(Bool.self, forKey: .extensionsEnabled) ?? true
     }
 }

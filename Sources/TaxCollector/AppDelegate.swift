@@ -209,6 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         case "edit": task.map { .edit($0.id) }
         case "proof": task.map { .proof($0.id) }
         case "lastcheck": task.map { .lastCheck($0.id) }
+        case "extend": task.map { .extend($0.id) }
         case "guardian": .guardian
         case "log": .log
         case "auditor": .auditor

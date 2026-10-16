@@ -21,6 +21,13 @@ The app is light by default. **Appearance** in the menu bar menu switches to Dar
 - **Locked in at 24 hours.** You can change or delete a task until 24 hours before it's due. After that, only moving the deadline earlier is allowed. There is a 5-minute grace period after creating a task, for typos.
 - **Guardian code.** A parent or friend sets it on first launch, and it is the only override. It can unlock for a while, excuse a task, approve a proof by hand, change a deadline, change the late penalty or the allowlist, or uninstall the app. Wrong codes back off: after the third wrong code you wait 30 s, then 60 s, and so on.
 - **Clock guard.** Winding the clock back doesn't move you back before a deadline.
+- **Asking for more time.** Before a deadline, you can ask Claude for up to 12 more hours. It grants time only for a real obstacle (being sick, a family event, a broken computer), never for "I didn't have time", and never more than you asked. The app enforces the limits whatever Claude says:
+  - you need at least 5 finished tasks in the last 30 days, with at least 80% on time;
+  - one request per task;
+  - at most 2 extensions a week;
+  - only before the deadline, so it can't end a lock that's already started.
+
+  Your guardian can turn this off.
 
 ## Install from the disk image (for testers)
 

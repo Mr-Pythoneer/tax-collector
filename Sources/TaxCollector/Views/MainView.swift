@@ -10,6 +10,7 @@ enum Sheet: Identifiable, Equatable {
     case auditor
     case lastCheck(UUID)
     case blackbaud
+    case extend(UUID)
 
     var id: String {
         switch self {
@@ -21,6 +22,7 @@ enum Sheet: Identifiable, Equatable {
         case .auditor: "auditor"
         case let .lastCheck(id): "last-check-\(id)"
         case .blackbaud: "blackbaud"
+        case let .extend(id): "extend-\(id)"
         }
     }
 }
@@ -348,6 +350,9 @@ struct TaskRow: View {
         .padding(.vertical, 5)
         .contextMenu {
             if task.isPending { Button("Edit…") { router.mainSheet = .edit(task.id) } }
+            if task.isPending && task.dueDate > model.now {
+                Button("Ask for More Time…") { router.mainSheet = .extend(task.id) }
+            }
             Button("Delete", role: .destructive) {
                 if model.delete(task.id) == .needsGuardian { router.mainSheet = .guardian }
             }
@@ -356,6 +361,12 @@ struct TaskRow: View {
 
     @ViewBuilder
     private func notes(latest: ProofSubmission?) -> some View {
+        if let granted = task.extensions?.last(where: { $0.decision == .granted }) {
+            Label("Given \(granted.hoursGranted) more hour\(granted.hoursGranted == 1 ? "" : "s") (was due \(Fmt.dateTime.string(from: granted.previousDue)))",
+                  systemImage: "clock.arrow.circlepath")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
         if let latest, task.isPending, latest.verdict == .rejected {
             Label("Proof not accepted: \(latest.reason)", systemImage: "xmark.circle.fill")
                 .font(.caption)
@@ -469,12 +480,13 @@ struct SheetContent: View {
         switch sheet {
         case .newTask: TaskEditorView(editing: nil, dismiss: dismiss, askGuardian: { present(.guardian) })
         case let .edit(id): TaskEditorView(editing: id, dismiss: dismiss, askGuardian: { present(.guardian) })
-        case let .proof(id): ProofSubmitView(taskID: id, dismiss: dismiss)
+        case let .proof(id): ProofSubmitView(taskID: id, dismiss: dismiss, askForTime: { present(.extend(id)) })
         case .guardian: GuardianView(dismiss: dismiss)
         case .log: LogView(dismiss: dismiss)
         case .auditor: AuditorView(dismiss: dismiss)
         case let .lastCheck(id): LastCheckView(taskID: id, dismiss: dismiss)
         case .blackbaud: BlackbaudView(dismiss: dismiss, askGuardian: { present(.guardian) })
+        case let .extend(id): ExtensionView(taskID: id, dismiss: dismiss)
         }
     }
 }

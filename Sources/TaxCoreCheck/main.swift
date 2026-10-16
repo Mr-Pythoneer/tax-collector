@@ -824,7 +824,63 @@ struct WrittenProof {
     }
 }
 
+struct MoreTime {
+    func task(_ due: TimeInterval, _ status: TaskStatus = .pending, extensions: [Extension]? = nil) -> TaxTask {
+        var t = TaxTask(title: "T", dueDate: t0.addingTimeInterval(due), createdAt: t0.addingTimeInterval(-40 * 86400), status: status)
+        t.extensions = extensions
+        return t
+    }
+    func onTime(_ n: Int) -> [TaxTask] { (0..<n).map { _ in task(-86400, .proven(at: t0.addingTimeInterval(-90000))) } }
+
+    func trackRecordCounts() {
+        let tasks = onTime(4) + [task(-86400, .provenLate(at: t0, penaltyEndsAt: t0)), task(-60), task(-86400, .excused(at: t0)),
+                                 task(-40 * 86400, .proven(at: t0.addingTimeInterval(-41 * 86400)))]
+        let r = TrackRecord.of(tasks, now: t0)
+        expect(r.onTime == 4 && r.late == 1 && r.missed == 1)   // the 40-day-old one is outside the window
+        expect(abs(r.onTimeRate - 4.0 / 6.0) < 0.001)
+    }
+
+    func needsAGoodRecord() {
+        let upcoming = task(3600)
+        expect(ExtensionPolicy.whyNot(task: upcoming, record: TrackRecord.of(onTime(4), now: t0), enabled: true, now: t0)?.contains("at least 5") == true)
+        let mixed = onTime(5) + [task(-86400, .provenLate(at: t0, penaltyEndsAt: t0)), task(-86400, .provenLate(at: t0, penaltyEndsAt: t0))]
+        expect(ExtensionPolicy.whyNot(task: upcoming, record: TrackRecord.of(mixed, now: t0), enabled: true, now: t0)?.contains("71%") == true)
+        expect(ExtensionPolicy.whyNot(task: upcoming, record: TrackRecord.of(onTime(5), now: t0), enabled: true, now: t0) == nil)
+    }
+
+    func hardLimits() {
+        let good = TrackRecord.of(onTime(6), now: t0)
+        expect(ExtensionPolicy.whyNot(task: task(3600), record: good, enabled: false, now: t0)?.contains("guardian") == true)
+        expect(ExtensionPolicy.whyNot(task: task(-60), record: good, enabled: true, now: t0)?.contains("before the deadline") == true)
+        expect(ExtensionPolicy.whyNot(task: task(3600, .proven(at: t0)), record: good, enabled: true, now: t0) != nil)
+        let asked = Extension(requestedAt: t0, hoursAsked: 3, reason: "x", decision: .denied, previousDue: t0)
+        expect(ExtensionPolicy.whyNot(task: task(3600, extensions: [asked]), record: good, enabled: true, now: t0)?.contains("already asked") == true)
+        let granted = Extension(requestedAt: t0.addingTimeInterval(-3600), hoursAsked: 6, reason: "x", decision: .granted, hoursGranted: 6, previousDue: t0)
+        let busyWeek = onTime(6) + [task(-86400, .proven(at: t0), extensions: [granted]), task(-86400, .proven(at: t0), extensions: [granted])]
+        expect(ExtensionPolicy.whyNot(task: task(3600), record: TrackRecord.of(busyWeek, now: t0), enabled: true, now: t0)?.contains("2 extensions") == true)
+        expect(ExtensionPolicy.clampedHours(granted: 20, asked: 8) == 8)
+        expect(ExtensionPolicy.clampedHours(granted: 20, asked: 30) == 12)
+        expect(ExtensionPolicy.clampedHours(granted: -3, asked: 5) == 0)
+    }
+
+    func claudesAnswerRead() {
+        func env(_ inner: String) -> Data { Data(#"{"type":"result","is_error":false,"result":"\#(inner.replacingOccurrences(of: "\"", with: "\\\""))"}"#.utf8) }
+        let g = Auditor.parseExtension(cliOutput: env(#"{"decision":"grant","hours":6,"reason":"Being sick is a real reason."}"#))
+        expect(g.decision == .granted && g.hours == 6)
+        let d = Auditor.parseExtension(cliOutput: env(#"{"decision":"deny","hours":0,"reason":"That's procrastination."}"#))
+        expect(d.decision == .denied && d.hours == 0)
+        expect(Auditor.parseExtension(cliOutput: env(#"{"decision":"grant","hours":0,"reason":"?"}"#)).decision == .denied)
+        expect(Auditor.parseExtension(cliOutput: Data()).decision == .error)
+        let p = Auditor.extensionPrompt(task: task(7200), hours: 6, reason: "I have a fever of 39.", record: TrackRecord.of(onTime(5), now: t0), now: t0)
+        expect(p.contains("Hours asked for: 6") && p.contains("On time: 5") && p.contains("fever"))
+    }
+}
+
 let checks: [(String, () -> Void)] = [
+    ("MoreTime.trackRecordCounts", { MoreTime().trackRecordCounts() }),
+    ("MoreTime.needsAGoodRecord", { MoreTime().needsAGoodRecord() }),
+    ("MoreTime.hardLimits", { MoreTime().hardLimits() }),
+    ("MoreTime.claudesAnswerRead", { MoreTime().claudesAnswerRead() }),
     ("WrittenProof.accountOnlyPromptSaysSo", { WrittenProof().accountOnlyPromptSaysSo() }),
     ("WrittenProof.filesAreListedAsFullPaths", { WrittenProof().filesAreListedAsFullPaths() }),
     ("WrittenProof.rulesCoverWrittenProof", { WrittenProof().rulesCoverWrittenProof() }),

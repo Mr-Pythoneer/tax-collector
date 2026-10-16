@@ -67,25 +67,59 @@ enum ProofVerifier {
 
     private static func run(task: TaxTask, submission: ProofSubmission, folder: URL, settings: Settings,
                             tokenFile: URL) -> Outcome {
-        guard let path = claudePath(settings) else {
-            return Outcome(verdict: .error, reason: "The Claude command-line tool isn't installed on this Mac.")
-        }
-        // Read only sees what we name, so give it absolute paths.
+        // Read only sees what we name, so give it full paths.
         let files = submission.attachments.map { folder.appendingPathComponent($0).path }
         let prompt = Auditor.prompt(task: task, note: submission.note, files: files, now: submission.submittedAt)
+        switch runClaude(prompt: prompt, rules: Auditor.systemRules, tools: "Read", folder: folder,
+                         settings: settings, tokenFile: tokenFile) {
+        case let .failure(problem):
+            return Outcome(verdict: .error, reason: problem.message)
+        case let .success(data):
+            let parsed = Auditor.parse(cliOutput: data)
+            return Outcome(verdict: parsed.verdict, reason: parsed.reason, checklist: parsed.checklist)
+        }
+    }
 
+    struct Problem: Error {
+        let message: String
+    }
+
+    /// Asks Claude whether you get more time. Returns its decision, hours and explanation.
+    static func decideExtension(task: TaxTask, hours: Int, reason: String, record: TrackRecord, folder: URL,
+                                settings: Settings, tokenFile: URL) async -> (ExtensionDecision, Int, String) {
+        await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let prompt = Auditor.extensionPrompt(task: task, hours: hours, reason: reason, record: record, now: Date())
+                switch runClaude(prompt: prompt, rules: Auditor.extensionRules, tools: "", folder: folder,
+                                 settings: settings, tokenFile: tokenFile) {
+                case let .failure(problem): cont.resume(returning: (.error, 0, problem.message))
+                case let .success(data):
+                    let answer = Auditor.parseExtension(cliOutput: data)
+                    cont.resume(returning: (answer.decision, answer.hours, answer.reason))
+                }
+            }
+        }
+    }
+
+    /// One run of `claude -p` in `folder`, with its answer saved there as auditor.json.
+    private static func runClaude(prompt: String, rules: String, tools: String, folder: URL, settings: Settings,
+                                  tokenFile: URL) -> Result<Data, Problem> {
+        guard let path = claudePath(settings) else {
+            return .failure(Problem(message: "The Claude command-line tool isn't installed on this Mac."))
+        }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let p = Process()
         p.executableURL = URL(fileURLWithPath: path)
         p.arguments = [
             "-p", prompt,
             "--output-format", "json",
-            "--tools", "Read",
+            "--tools", tools,
             "--model", settings.claudeModel,
             "--no-session-persistence",
             "--strict-mcp-config",
             "--setting-sources", "local",
             "--disable-slash-commands",
-            "--append-system-prompt", Auditor.systemRules,
+            "--append-system-prompt", rules,
         ]
         p.currentDirectoryURL = folder
         p.environment = environment(tokenFile: tokenFile)
@@ -99,7 +133,7 @@ enum ProofVerifier {
         do {
             try p.run()
         } catch {
-            return Outcome(verdict: .error, reason: "Couldn't start the Claude CLI: \(error.localizedDescription)")
+            return .failure(Problem(message: "Couldn't start the Claude CLI: \(error.localizedDescription)"))
         }
         let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: killer)
@@ -109,10 +143,9 @@ enum ProofVerifier {
         try? data.write(to: folder.appendingPathComponent("auditor.json"))
 
         if p.terminationReason == .uncaughtSignal {
-            return Outcome(verdict: .error, reason: "Claude took longer than \(Int(timeout)) seconds, so the check was stopped.")
+            return .failure(Problem(message: "Claude took longer than \(Int(timeout)) seconds, so it was stopped."))
         }
-        let parsed = Auditor.parse(cliOutput: data)
-        return Outcome(verdict: parsed.verdict, reason: parsed.reason, checklist: parsed.checklist)
+        return .success(data)
     }
 
     /// launchd gives a bare environment, and Claude Code variables from a parent session would confuse the CLI.

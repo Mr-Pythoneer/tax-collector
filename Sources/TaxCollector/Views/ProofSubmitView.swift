@@ -6,6 +6,7 @@ struct ProofSubmitView: View {
     @Environment(AppModel.self) private var model
     let taskID: UUID
     let dismiss: () -> Void
+    var askForTime: (() -> Void)?
 
     @State private var note = ""
     @State private var files: [URL] = []
@@ -81,6 +82,11 @@ struct ProofSubmitView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if let askForTime, let task = model.task(taskID), task.isPending, task.dueDate > model.now {
+                Button("Need more time?", action: askForTime)
+                    .buttonStyle(.link)
+                    .font(.callout)
+            }
             HStack {
                 Text(footnote)
                     .font(.caption).foregroundStyle(.secondary)

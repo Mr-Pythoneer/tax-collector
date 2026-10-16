@@ -183,6 +183,8 @@ private struct GuardianPanel: View {
                     Button("Turn Off") { _ = model.stopFeed(guardianApproved: true) }
                 }
             }
+            Toggle("Allow asking Claude for up to \(ExtensionPolicy.maxHours) more hours",
+                   isOn: Binding(get: { model.settings.extensionsEnabled }, set: { model.setExtensionsEnabled($0) }))
             Stepper(value: $penalty, in: 0...240, step: 5) {
                 Text("Late penalty: \(penalty) minutes locked after late proof")
             }
