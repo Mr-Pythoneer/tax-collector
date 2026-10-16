@@ -43,10 +43,12 @@ public enum Agenda {
     /// Blackbaud titles look like "Mathematics 7 - MAT7 - 7B: Unit 1 Lesson 4". Split off the course
     /// ("Mathematics 7") so the assignment name can lead. Your own tasks have no course.
     public static func courseAndTitle(_ task: TaxTask) -> (course: String?, title: String) {
-        guard task.isFromBlackbaud, let colon = task.title.range(of: ": ") else { return (nil, task.title) }
-        let prefix = String(task.title[..<colon.lowerBound])
-        let rest = String(task.title[colon.upperBound...]).trimmingCharacters(in: .whitespaces)
-        guard !rest.isEmpty else { return (nil, task.title) }
+        // Older versions saved some titles with codes like "&#160;" still in them.
+        let title = task.isFromBlackbaud ? Blackbaud.plainText(task.title) : task.title
+        guard task.isFromBlackbaud, let colon = title.range(of: ": ") else { return (nil, title) }
+        let prefix = String(title[..<colon.lowerBound])
+        let rest = String(title[colon.upperBound...]).trimmingCharacters(in: .whitespaces)
+        guard !rest.isEmpty else { return (nil, title) }
         // Course parts are joined by a dash followed by a space; "2026-27" has none, so it stays whole.
         let course = prefix.components(separatedBy: " - ").first?
             .replacingOccurrences(of: #"\s*-\s+.*$"#, with: "", options: .regularExpression)

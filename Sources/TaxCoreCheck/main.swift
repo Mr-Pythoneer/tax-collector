@@ -693,6 +693,7 @@ struct AgendaRules {
         expect(Agenda.courseAndTitle(task("Science 7- SCI7 - 7B: Microscopy Lab", due: 0, bb: true)).course == "Science 7")
         expect(Agenda.courseAndTitle(task("Middle School Students - 2026-27: Exploratory Form", due: 0, bb: true)).course == "Middle School Students")
         expect(Agenda.courseAndTitle(task("Physical Education - PHE7 - 7B: Cross Country Run", due: 0, bb: true)).course == "Physical Education")
+        expect(Agenda.courseAndTitle(task("Music 7 - MUS7 - 7B: Playing Test No.1&#160;", due: 0, bb: true)).title == "Playing Test No.1")
         let manual = Agenda.courseAndTitle(task("Note: buy pens", due: 0))
         expect(manual.course == nil && manual.title == "Note: buy pens")
     }
