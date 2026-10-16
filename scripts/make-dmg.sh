@@ -7,7 +7,8 @@ cd "$(dirname "$0")/.."
 ./scripts/build-app.sh
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "build.noindex/Tax Collector.app/Contents/Info.plist")
 STAGE="build.noindex/dmg"
-DMG="build.noindex/TaxCollector-$VERSION.dmg"
+# Always the same name, so the README's download link (releases/latest/download/TaxCollector.dmg) keeps working.
+DMG="build.noindex/TaxCollector.dmg"
 
 rm -rf "$STAGE" "$DMG"
 mkdir -p "$STAGE"

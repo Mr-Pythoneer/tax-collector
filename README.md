@@ -2,6 +2,8 @@
 
 A Mac menu-bar app that holds you to your own deadlines. Add a task and a due date. Before the deadline, pay with proof: a screenshot, photo or file. Claude checks that the proof really shows the task done. If nothing is accepted by the deadline, every app except your allowed ones gets closed until you pay.
 
+**[Download Tax Collector (.dmg)](https://github.com/Mr-Pythoneer/tax-collector/releases/latest/download/TaxCollector.dmg)** for Macs with Apple silicon (M1 or newer) and macOS 14 or later. It's the newest version; the steps to install it are [below](#install-from-the-disk-image) and inside the disk image.
+
 **Allowed during a lock:** Arc, Claude, Word, Excel, PowerPoint, Outlook, OneNote, Teams, OneDrive, Mail, Zoom, VooV Meeting, Activity Monitor (plus Finder and a few system helpers).
 
 ## The task list
@@ -30,9 +32,9 @@ The app is light by default. **Appearance** in the menu bar menu switches to Dar
 
   Your guardian can turn this off.
 
-## Install from the disk image (for testers)
+## Install from the disk image
 
-Download `TaxCollector-<version>.dmg` from the GitHub Releases page. It needs a Mac with Apple silicon and macOS 14 or later.
+[Download TaxCollector.dmg](https://github.com/Mr-Pythoneer/tax-collector/releases/latest/download/TaxCollector.dmg). That link always gets the newest version; older ones are on the [Releases page](https://github.com/Mr-Pythoneer/tax-collector/releases). It needs a Mac with Apple silicon and macOS 14 or later.
 
 1. **Copy it:** drag Tax Collector into Applications.
 2. **Get past macOS's warning:** the app isn't notarized (that needs a paid Apple developer account), so the first time you open it, macOS refuses. Click Done, then go to System Settings → Privacy & Security and click **Open Anyway**.
@@ -45,7 +47,9 @@ curl -fsSL https://claude.ai/install.sh | bash
 claude auth login
 ```
 
-`./scripts/make-dmg.sh` builds the disk image into `build.noindex/`, with `Resources/How to Install.txt` inside it. Build output goes in `build.noindex/` so Spotlight lists only the installed app.
+`./scripts/make-dmg.sh` builds the disk image as `build.noindex/TaxCollector.dmg`, with `Resources/How to Install.txt` inside it. Build output goes in `build.noindex/` so Spotlight lists only the installed app.
+
+To publish a version, attach that file to a GitHub release (`gh release create v<version> build.noindex/TaxCollector.dmg`). Keep the name `TaxCollector.dmg`: the download link at the top of this page asks for that name from the latest release.
 
 ## Build and install
 
