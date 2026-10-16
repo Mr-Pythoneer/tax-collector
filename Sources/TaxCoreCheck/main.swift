@@ -211,6 +211,9 @@ struct Persistence {
         expect(s.claudePath == "/opt/homebrew/bin/claude")
         expect(s.blackbaudURL == nil)
         expect(s.allDayDueMinutes == Blackbaud.defaultAllDayDueMinutes)
+        // 10 PM the evening before.
+        let e = ICalEvent(uid: "a", start: .allDay(year: 2026, month: 10, day: 16))
+        expect(Blackbaud.dueDate(of: e, allDayDueMinutes: s.allDayDueMinutes, timeZone: ny) == nyDate(2026, 10, 15, 22, 0))
     }
 }
 

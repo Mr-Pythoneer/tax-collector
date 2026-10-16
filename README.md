@@ -73,7 +73,7 @@ Tax Collector can import assignments from Blackbaud (`yourschool.myschoolapp.com
 
 - The feed is checked every 30 minutes, and again 5 minutes after a failed check. Each assignment becomes a task, matched by the event's UID, so a re-check never makes duplicates.
 - Assignments already past due aren't imported.
-- A due date with no time gets the time you choose in the Blackbaud window. It can also be the evening before.
+- Most assignments have a date but no time. By default they're due at **10 PM the evening before**, because homework is usually due when class starts. You can change this in the Blackbaud window, either to a different time or to a time on the due date itself.
 - If a teacher changes an assignment, the task changes too, under the same lock-in rule as your own edits. Before it's locked in, anything can change. After that, only an earlier deadline gets through. A deadline is never moved into the past.
 - If you've edited an imported task, your edit stays until the teacher changes that assignment again.
 - Assignments that drop out of the feed stay as tasks, because the feed only looks ahead.

@@ -55,8 +55,9 @@ public struct BlackbaudSyncResult: Sendable {
 public enum Blackbaud {
     public static let pollInterval: TimeInterval = 30 * 60
     public static let retryInterval: TimeInterval = 5 * 60
-    /// Default for assignments with a date but no time: minutes after midnight on the due day.
-    public static let defaultAllDayDueMinutes = 23 * 60 + 59
+    /// Default for assignments with a date but no time: 10 PM the evening before, since homework
+    /// is usually due when class starts. Minutes after midnight on the due day; negative is the day before.
+    public static let defaultAllDayDueMinutes = -2 * 60
 
     // MARK: Feed link
 
