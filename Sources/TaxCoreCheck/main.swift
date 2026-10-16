@@ -800,7 +800,34 @@ struct ChangingUIDs {
     }
 }
 
+struct WrittenProof {
+    let task = TaxTask(title: "Music 7 - MUS7 - 7B: Playing Test No.1", details: "Play No. 41.", dueDate: t0, createdAt: t0)
+
+    func accountOnlyPromptSaysSo() {
+        let p = Auditor.prompt(task: task, note: "Played No. 41 in class; missed the key change at bar 12.", files: [], now: t0)
+        expect(p.contains("EVIDENCE FILES: none"))
+        expect(p.contains("Judge the written account"))
+        expect(p.contains("missed the key change"))
+        expect(!p.contains("Read every evidence file"))
+    }
+
+    func filesAreListedAsFullPaths() {
+        let p = Auditor.prompt(task: task, note: "", files: ["/tmp/proof/a.png", "/tmp/proof/b.pdf"], now: t0)
+        expect(p.contains("- /tmp/proof/a.png\n- /tmp/proof/b.pdf"))
+        expect(!p.contains("./"))
+        expect(p.contains("Read every evidence file"))
+    }
+
+    func rulesCoverWrittenProof() {
+        expect(Auditor.systemRules.contains("When there are no files"))
+        expect(Auditor.minimumWrittenProof >= 20)
+    }
+}
+
 let checks: [(String, () -> Void)] = [
+    ("WrittenProof.accountOnlyPromptSaysSo", { WrittenProof().accountOnlyPromptSaysSo() }),
+    ("WrittenProof.filesAreListedAsFullPaths", { WrittenProof().filesAreListedAsFullPaths() }),
+    ("WrittenProof.rulesCoverWrittenProof", { WrittenProof().rulesCoverWrittenProof() }),
     ("ChangingUIDs.newUIDsDontDuplicate", { ChangingUIDs().newUIDsDontDuplicate() }),
     ("ChangingUIDs.deletedStaysDeletedAfterNewUID", { ChangingUIDs().deletedStaysDeletedAfterNewUID() }),
     ("ChangingUIDs.weeklyRepeatsGetTheirOwnTasks", { ChangingUIDs().weeklyRepeatsGetTheirOwnTasks() }),

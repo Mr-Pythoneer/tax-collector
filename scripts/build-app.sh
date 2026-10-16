@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 swift build -c release --arch arm64
 BIN="$(swift build -c release --arch arm64 --show-bin-path)/TaxCollector"
 APP="build/Tax Collector.app"
-VERSION="0.2.0"
+VERSION="0.2.1"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -25,7 +25,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
-    <key>CFBundleVersion</key><string>2</string>
+    <key>CFBundleVersion</key><string>3</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>

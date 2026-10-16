@@ -33,6 +33,9 @@ in Terminal:
 
 Without it, your guardian has to approve every proof by hand.
 
+No file to show, like a playing test? Leave the files empty and describe
+exactly what you did. Vague descriptions get rejected.
+
 
 GOOD TO KNOW
 

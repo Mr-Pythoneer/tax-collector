@@ -16,7 +16,7 @@ The app is light by default. **Appearance** in the menu bar menu switches to Dar
 
 ## Rules
 
-- **Proof** is checked by the local `claude` CLI. A rejection means the task is still owed.
+- **Proof** is checked by the local `claude` CLI, and a rejection means the task is still owed. Proof can be files, or a written account for things a file can't show, like a playing test. A written account is accepted only if it's specific and believable for the task.
 - **Late proof** still unlocks you, after a late penalty: 30 more minutes locked by default.
 - **Locked in at 24 hours.** You can change or delete a task until 24 hours before it's due. After that, only moving the deadline earlier is allowed. There is a 5-minute grace period after creating a task, for typos.
 - **Guardian code.** A parent or friend sets it on first launch, and it is the only override. It can unlock for a while, excuse a task, approve a proof by hand, change a deadline, change the late penalty or the allowlist, or uninstall the app. Wrong codes back off: after the third wrong code you wait 30 s, then 60 s, and so on.

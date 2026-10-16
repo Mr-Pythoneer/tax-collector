@@ -139,6 +139,16 @@ enum SelfTest {
               accepted.flatMap { t in t.proofs.last.map { FileManager.default.fileExists(atPath: model.proofFolder(task: t.id, submission: $0.id).appendingPathComponent("selftest-proof.txt").path) } } ?? false)
         check("proof: Claude's checklist is kept", accepted?.checklist?.map(\.text) == ["Do 1-5", "Do 6-10"])
 
+        model.settings.claudePath = fakeClaude("claude-accept-written", #"{"verdict":"accept","reason":"Specific and believable.","checklist":["Play No. 41"]}"#)
+        model.addTask(title: "Written proof", details: "Playing test: No. 41", due: Date().addingTimeInterval(86400))
+        if let w = newest("Written proof") {
+            model.submitProof(taskID: w.id, note: "Played No. 41 for the class this morning; lost the beat once in bar 12 and got 4/5.", files: [])
+            _ = await wait { model.task(w.id)?.proofs.last?.verdict != nil }
+            let after = model.task(w.id)
+            check("proof: a written account with no files is checked and accepted",
+                  after?.proofs.last?.attachments.isEmpty == true && after?.proofs.last?.verdict == .accepted && after?.isPending == false)
+        }
+
         let rejected = await submit("Proof rejected",
                                     claude: fakeClaude("claude-reject", #"{"verdict":"reject","reason":"Blank page."}"#))
         check("proof: rejected proof leaves the task due", rejected?.isPending == true && rejected?.proofs.last?.verdict == .rejected)
@@ -148,7 +158,7 @@ enum SelfTest {
               broken?.isPending == true && broken?.proofs.last?.verdict == .error,
               broken?.proofs.last?.reason ?? "")
         model.settings.claudePath = realClaude
-        for t in model.tasks where t.title.hasPrefix("Proof ") { _ = model.delete(t.id, guardianApproved: true) }
+        for t in model.tasks where t.title.hasPrefix("Proof ") || t.title == "Written proof" { _ = model.delete(t.id, guardianApproved: true) }
 
         // A check cut off by a crash isn't left hanging
         let hanging = TaxTask(title: "Interrupted", dueDate: Date().addingTimeInterval(86400), createdAt: Date(),

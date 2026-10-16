@@ -52,18 +52,22 @@ struct ProofSubmitView: View {
     private var form: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("What did you do? (optional)").font(.callout)
+                Text("Describe what you did").font(.callout)
                 TextEditor(text: $note)
                     .font(.body)
-                    .frame(height: 56)
+                    .frame(height: 84)
                     .scrollContentBackground(.hidden)
                     .padding(4)
                     .background(Color(nsColor: .textBackgroundColor))
                     .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor)))
+                Text("Can't show it with a file, like a playing test? Leave the files empty and describe exactly what you did: what, when, how it went. Vague answers get rejected.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Proof").font(.callout)
+                Text(files.isEmpty && writtenEnough ? "Files (optional)" : "Files").font(.callout)
                 dropZone
                 HStack {
                     Button("Add Files…", action: choose)
@@ -78,15 +82,26 @@ struct ProofSubmitView: View {
             }
 
             HStack {
-                Text("Claude compares your proof with the task.")
+                Text(footnote)
                     .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer()
                 Button("Cancel", action: dismiss).keyboardShortcut(.cancelAction)
                 Button("Submit", action: send)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(files.isEmpty)
+                    .disabled(files.isEmpty && !writtenEnough)
             }
         }
+    }
+
+    private var writtenEnough: Bool {
+        note.trimmingCharacters(in: .whitespacesAndNewlines).count >= Auditor.minimumWrittenProof
+    }
+
+    private var footnote: String {
+        if !files.isEmpty { return "Claude compares your proof with the task." }
+        if writtenEnough { return "No files: Claude judges your description on its own." }
+        return "Add a file, or describe what you did in a sentence or two."
     }
 
     private var dropZone: some View {
