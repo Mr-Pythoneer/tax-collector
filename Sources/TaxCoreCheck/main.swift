@@ -876,7 +876,51 @@ struct MoreTime {
     }
 }
 
+struct AssignmentPage {
+    let host = "school.myschoolapp.com"
+    var sample: [String: Any] {
+        [
+            "LongDescription": "<p>Finish <b>both</b> parts.</p>",
+            "AssignmentType": "Homework (Minor)",
+            "MaxPoints": 10,
+            "DropboxInd": true,
+            "DownloadItems": [
+                ["DownloadUrl": "/ftpimages/12/download/download_99.pdf", "FriendlyFileName": "Worksheet 1.4.pdf",
+                 "FileName": "download_99.pdf", "ShortDescription": "Worksheet 1.4"],
+                ["DownloadUrl": "", "FileName": "broken.pdf"],
+            ],
+            "LinkItems": [
+                ["Url": "https://example.org/lesson/4", "ShortDescription": "Lesson &amp; slides"],
+                ["Url": "www.example.com/video", "ShortDescription": ""],
+            ],
+        ]
+    }
+
+    func parsesEverything() {
+        guard let d = AssignmentDetailsParser.parse(sample, indexID: 90398882, host: host) else { expect(false); return }
+        expect(d.instructionsHTML.contains("<b>both</b>"))
+        expect(d.type == "Homework (Minor)" && d.maxPoints == 10 && d.submitsOnline)
+        expect(d.attachments.count == 1)
+        expect(d.attachments.first?.url.absoluteString == "https://school.myschoolapp.com/ftpimages/12/download/download_99.pdf")
+        expect(d.attachments.first?.title == "Worksheet 1.4" && d.attachments.first?.fileName == "Worksheet 1.4.pdf")
+        expect(d.links.map(\.title) == ["Lesson & slides", "www.example.com"])
+        expect(d.links.last?.url.absoluteString == "https://www.example.com/video")
+        expect(d.pageURL.absoluteString == "https://school.myschoolapp.com/lms-assignment/assignment/assignment-student-view/90398882")
+    }
+
+    func urlsAndSites() {
+        expect(AssignmentDetailsParser.absolute("//cdn.example.com/a.pdf", host: host)?.absoluteString == "https://cdn.example.com/a.pdf")
+        expect(AssignmentDetailsParser.absolute("not a link", host: host) == nil)
+        expect(AssignmentDetailsParser.isOnSchoolSite(URL(string: "https://School.myschoolapp.com/x")!, host: host))
+        expect(!AssignmentDetailsParser.isOnSchoolSite(URL(string: "https://example.org/x")!, host: host))
+        expect(AssignmentDetailsParser.parse(["nothing": 1], indexID: 1, host: host)?.attachments.isEmpty == true)
+        expect(AssignmentDetailsParser.parse("not an object", indexID: 1, host: host) == nil)
+    }
+}
+
 let checks: [(String, () -> Void)] = [
+    ("AssignmentPage.parsesEverything", { AssignmentPage().parsesEverything() }),
+    ("AssignmentPage.urlsAndSites", { AssignmentPage().urlsAndSites() }),
     ("MoreTime.trackRecordCounts", { MoreTime().trackRecordCounts() }),
     ("MoreTime.needsAGoodRecord", { MoreTime().needsAGoodRecord() }),
     ("MoreTime.hardLimits", { MoreTime().hardLimits() }),

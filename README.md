@@ -11,6 +11,7 @@ The main window lists what's due, soonest first, grouped by day (Overdue, Today,
 - **Classes:** Blackbaud assignments show their class under the title, with a coloured dot. Each class keeps its colour.
 - **Notices:** problems show at the top of the list: the lock, a guardian unlock, proof checking not working, or Blackbaud import failing.
 - **Below the list:** paid Blackbaud work waiting for its last check comes after the days. Finished tasks fold into **Completed**.
+- **Details:** click a task (or right-click → **Show Details…**) to open it in its own window: what to do, the teacher's files and links for Blackbaud assignments, and your proof so far. It can stay open next to your work.
 
 The app is light by default. **Appearance** in the menu bar menu switches to Dark or Match System.
 
@@ -77,10 +78,11 @@ TAXCOLLECTOR_DATA_DIR=/tmp/tc-test TAXCOLLECTOR_DRY_RUN=1 "build.noindex/Tax Col
 - `TAXCOLLECTOR_DRY_RUN=1` logs which apps would be closed instead of closing them, and lets you quit normally. So does `TAXCOLLECTOR_ALLOW_QUIT=1`.
 - `TAXCOLLECTOR_ENFORCE_ONLY=com.apple.TextEdit,com.apple.calculator` makes a real lock close only those apps. This lets you test real closing without losing anything else you have open.
 - `TAXCOLLECTOR_SELFTEST=1` runs every feature through the app's own code with a fake Claude and a fake Blackbaud. It writes `selftest.txt` and quits. Always use it with a throwaway `TAXCOLLECTOR_DATA_DIR`.
-- `TAXCOLLECTOR_TEST_SHEET=new|edit|proof|lastcheck|guardian|blackbaud|auditor|log|lock`, optionally followed by `:part of a task title`, opens that screen at launch for screenshots.
+- `TAXCOLLECTOR_TEST_SHEET=new|edit|proof|lastcheck|extend|details|guardian|blackbaud|auditor|log|lock`, optionally followed by `:part of a task title`, opens that screen at launch for screenshots.
+- `TAXCOLLECTOR_TEST_DETAILS_JSON=/path/to/page.json` makes every assignment's details window show that saved `UserAssignmentDetailsGetAllStudentData` answer instead of asking Blackbaud.
 - `TAXCOLLECTOR_TEST_GUARDIAN_CODE` types a guardian code into the code box. It still has to be the right code.
 - Setup is never run in a test like this unless you add `TAXCOLLECTOR_TEST_SETUP=1`. With it, `TAXCOLLECTOR_TEST_APPLICATIONS_DIR` stands in for the Applications folder, and `TAXCOLLECTOR_LABEL` names the background copy. Launching with `--finish-setup` acts like clicking Finish Setup.
-- `TAXCOLLECTOR_BLACKBAUD_PROBE=1` opens the Blackbaud sign-in if needed, then writes `blackbaud-probe.json`: a read-only report of what Blackbaud's endpoints return and which assignment each imported task matches. It saves only the fields the app uses, never cookies or tokens. Run this first when Blackbaud changes something.
+- `TAXCOLLECTOR_BLACKBAUD_PROBE=1` opens the Blackbaud sign-in if needed, then writes `blackbaud-probe.json`: a read-only report of what Blackbaud's endpoints return, which assignment each imported task matches, and what one assignment's page holds (counts only). It saves only the fields the app uses, never cookies or tokens. Run this first when Blackbaud changes something.
 - `TAXCOLLECTOR_TEST_LAST_CHECK=<part of a title>` opens that paid task's last check, ticks everything and confirms it, just as your clicks would. **This really marks the assignment Completed in Blackbaud.**
 - To test Blackbaud import without a real feed, put `"blackbaudURL": "file:///path/to/sample.ics"` in that folder's `settings.json`. The app polls it at launch.
 
@@ -139,3 +141,12 @@ Blackbaud never needs anything submitted, but its Assignment Center has a To do 
 
 This uses the same private web endpoints the Blackbaud student site uses (`/api/assignment2/assignmentstatusupdate` and the Assignment Center list). Blackbaud changes them now and then, so they're kept together in `Sources/TaxCollector/BlackbaudAPI.swift`.
 
+### Assignment details
+
+Click an imported assignment to see what its page in Blackbaud shows:
+
+- **What to do:** the teacher's full instructions, with their links, bold and lists. The calendar feed only has a short version, which shows until the page loads.
+- **The teacher's files:** **Open** downloads one with your Blackbaud sign-in into your Downloads folder, the way a browser would, then opens it. Opening it again reuses that copy. If a file won't download, it opens in the browser instead.
+- **Links,** the assignment type and points, and **Open in Blackbaud** for the page itself.
+
+This needs the same Blackbaud sign-in as the last check; signed out, the window says so and offers **Sign In to Blackbaud…**, then loads by itself once you're in. During a lock, anything that would open in an app that isn't allowed (Preview, another browser) opens in Arc instead. The page comes from `/api/assignment2/UserAssignmentDetailsGetAllStudentData`, read-only.

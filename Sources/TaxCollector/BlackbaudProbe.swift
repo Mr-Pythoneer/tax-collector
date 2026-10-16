@@ -37,6 +37,27 @@ enum BlackbaudProbe {
                 return ["task": task.title, "due": task.dueDate.description,
                         "match": match.map(describe) ?? "NONE"] as [String: Any]
             }
+
+            // One assignment's page, as the details window reads it. Counts only, not what it says.
+            let matched = tasks.first { task in
+                guard case let .blackbaud(uid) = task.source else { return false }
+                return BlackbaudMatch.find(feedUID: uid, title: task.title, due: task.dueDate, in: items) != nil
+            }
+            if let task = matched {
+                switch await BlackbaudAPI.details(for: task, link: link) {
+                case let .success(page):
+                    let host = link.host ?? ""
+                    report["details"] = ["task": task.title, "type": page.type, "maxPoints": page.maxPoints ?? -1,
+                                         "submitsOnline": page.submitsOnline, "instructionsLength": page.instructionsHTML.count,
+                                         "attachments": page.attachments.count,
+                                         "attachmentsOnSchoolSite": page.attachments.filter {
+                                             AssignmentDetailsParser.isOnSchoolSite($0.url, host: host)
+                                         }.count,
+                                         "links": page.links.count] as [String: Any]
+                case let .failure(problem):
+                    report["details"] = ["task": task.title, "error": problem.message]
+                }
+            }
         } catch {
             report["error"] = "\(error)"
         }

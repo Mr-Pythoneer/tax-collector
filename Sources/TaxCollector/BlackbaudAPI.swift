@@ -119,6 +119,53 @@ enum BlackbaudAPI {
         return nil
     }
 
+    // MARK: Assignment details
+
+    private static func detailsPath(indexID: Int, userID: Int) -> String {
+        "/api/assignment2/UserAssignmentDetailsGetAllStudentData?assignmentIndexId=\(indexID)&studentUserId=\(userID)&personaId=2"
+    }
+
+    /// The assignment's full instructions, files and links, as its page in Blackbaud shows them.
+    @MainActor
+    static func details(for task: TaxTask, link: BlackbaudLink) async -> Result<AssignmentDetails, BlackbaudLink.Failure> {
+        guard case let .blackbaud(uid) = task.source, let host = link.host else {
+            return .failure(.init(message: "This task didn't come from Blackbaud."))
+        }
+        do {
+            let context = try await link.call("GET", contextPath)
+            guard isSignedIn(context.status, context.json),
+                  let user = (context.json as? [String: Any])?["UserInfo"] as? [String: Any],
+                  let userID = (user["UserId"] as? NSNumber)?.intValue else {
+                return .failure(.init(message: "You're signed out of Blackbaud.", signedOut: true))
+            }
+            let items = try await assignments(around: task.dueDate, link: link)
+            guard let match = BlackbaudMatch.find(feedUID: uid, title: task.title, due: task.dueDate, in: items) else {
+                return .failure(.init(message: "Couldn't find this assignment in Blackbaud."))
+            }
+            let r = try await link.call("GET", detailsPath(indexID: match.indexID, userID: userID))
+            guard r.status == 200, let details = AssignmentDetailsParser.parse(r.json, indexID: match.indexID, host: host) else {
+                return .failure(.init(message: "Blackbaud didn't send the assignment page (HTTP \(r.status))."))
+            }
+            return .success(details)
+        } catch {
+            return .failure(.init(message: error.localizedDescription))
+        }
+    }
+
+    /// One of the teacher's files, downloaded with your sign-in.
+    @MainActor
+    static func download(_ url: URL, link: BlackbaudLink) async -> Result<Data, BlackbaudLink.Failure> {
+        do {
+            let r = try await link.download(url)
+            guard (200..<300).contains(r.status), !r.data.isEmpty else {
+                return .failure(.init(message: "Blackbaud wouldn't send the file (HTTP \(r.status))."))
+            }
+            return .success(r.data)
+        } catch {
+            return .failure(.init(message: "Couldn't download it. \(error.localizedDescription)"))
+        }
+    }
+
     /// Finds the assignment behind `task` and marks it Completed. Returns nil on success, or why it failed.
     @MainActor
     static func markCompleted(_ task: TaxTask, link: BlackbaudLink) async -> String? {
@@ -137,7 +184,7 @@ enum BlackbaudAPI {
 
             return try await setStatus(match.indexID, to: completedStatus, around: task.dueDate, link: link)
         } catch {
-            return "Couldn't reach Blackbaud: \(error)"
+            return error.localizedDescription
         }
     }
 }

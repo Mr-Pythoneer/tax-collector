@@ -344,6 +344,40 @@ enum SelfTest {
         check("allowlist: and remove it",
               !Allowlist.isAllowed(bundleID: "com.apple.TextEdit", extra: model.settings.extraAllowedBundleIDs, selfID: nil))
 
+        // A teacher's instructions, as the details window shows them
+        func rich(_ html: String) -> String? { RichText.fromHTML(html).map { String($0.characters) } }
+        let page = RichText.fromHTML("<p>Read <b>chapter 3</b>.</p><p>&nbsp;</p><ul><li>Take notes</li><li>Answer 1&ndash;5</li></ul>"
+                                     + "<p>See <a href=\"https://example.com/guide\">the guide</a>.</p>")
+        let pageText = page.map { String($0.characters) } ?? ""
+        check("details: paragraphs get a blank line, list items stay together",
+              pageText == "Read chapter 3.\n\n   • Take notes\n   • Answer 1–5\n\nSee the guide.", pageText.debugDescription)
+        check("details: the teacher's links still work",
+              page?.runs.contains { $0.link?.absoluteString == "https://example.com/guide" } == true)
+        check("details: bold stays bold", page?.runs.contains { $0.inlinePresentationIntent == .stronglyEmphasized } == true)
+        let breaks = rich("Due Friday<br>Points: 20<br><br>Bring notes</p><p>Next</p>") ?? ""
+        check("details: a <br> is one line break", breaks == "Due Friday\nPoints: 20\n\nBring notes\n\nNext", breaks.debugDescription)
+        let numbered = rich("<ol><li>One</li><li>Two<ul><li>Nested</li></ul></li></ol>") ?? ""
+        check("details: numbered and nested lists", numbered == "   1. One\n   2. Two\n       ◦ Nested", numbered.debugDescription)
+        check("details: an empty page falls back to the calendar's text", rich("<p>&nbsp;</p>") == nil)
+        check("details: plain addresses become links",
+              RichText.linkified("See www.example.com today").runs.contains { $0.link?.host == "www.example.com" })
+
+        // The teacher's files land in Downloads (a scratch folder here), like a browser download
+        let downloads = dir.appendingPathComponent("downloads", isDirectory: true)
+        try? FileManager.default.createDirectory(at: downloads, withIntermediateDirectories: true)
+        let source = URL(string: "https://school.example/ftpimages/1/rubric.pdf")!
+        let first = try? model.saveDownload(Data("rubric".utf8), named: "Rubric.pdf", from: source, into: downloads)
+        check("files: saved under the teacher's name", first?.lastPathComponent == "Rubric.pdf")
+        let again = try? model.saveDownload(Data("rubric".utf8), named: "Rubric.pdf", from: source, into: downloads)
+        check("files: opening it again reuses the copy", again == first)
+        let changed = try? model.saveDownload(Data("new rubric".utf8), named: "Rubric.pdf", from: source, into: downloads)
+        check("files: a different file with the same name gets a number", changed?.lastPathComponent == "Rubric 2.pdf")
+        let odd = try? model.saveDownload(Data("x".utf8), named: "../Unit 3/Notes:v2.docx", from: source, into: downloads)
+        check("files: odd names stay inside the folder", odd?.deletingLastPathComponent().standardizedFileURL == downloads.standardizedFileURL
+              && odd?.lastPathComponent == "-Unit 3-Notes-v2.docx", odd?.path ?? "nil")
+        let marked = (try? first?.resourceValues(forKeys: [.quarantinePropertiesKey]))?.quarantineProperties
+        check("files: marked as downloaded from the web", marked != nil)
+
         // Everything ends up on disk
         let saved = model.store.loadTasks()
         check("storage: tasks on disk match the app", Set(saved.map(\.id)) == Set(model.tasks.map(\.id)))

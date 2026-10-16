@@ -8,6 +8,13 @@ enum GuardianCheck: Equatable {
     case coolingDown(until: Date)
 }
 
+/// An assignment's page from Blackbaud, as far as it has loaded.
+enum DetailsState: Equatable {
+    case loading
+    case loaded(AssignmentDetails)
+    case failed(String, signedOut: Bool)
+}
+
 /// What's left before Tax Collector can lock anything.
 enum SetupNeed: Equatable {
     case moveToApplications
@@ -47,6 +54,9 @@ final class AppModel {
     var feedError: String?
     var blackbaudSignedIn = false
     var setupNeed: SetupNeed?
+    var details: [UUID: DetailsState] = [:]
+    /// Attachments being downloaded, by attachment id.
+    var downloading: Set<String> = []
     var setupError: String?
 
     @ObservationIgnored let enforcer: Enforcer
@@ -59,6 +69,13 @@ final class AppModel {
     @ObservationIgnored var onBlackbaudSignIn: () -> Void = {}
     /// Moves the app into Applications if needed, then sets it to run in the background.
     @ObservationIgnored var onFinishSetup: () -> Void = {}
+    @ObservationIgnored var onOpenDetails: (UUID) -> Void = { _ in }
+    @ObservationIgnored var blackbaudDetails: (TaxTask) async -> Result<AssignmentDetails, BlackbaudLink.Failure> = { _ in
+        .failure(.init(message: "Blackbaud isn't connected."))
+    }
+    @ObservationIgnored var blackbaudDownload: (URL) async -> Result<Data, BlackbaudLink.Failure> = { _ in
+        .failure(.init(message: "Blackbaud isn't connected."))
+    }
     @ObservationIgnored var onBlackbaudSignOut: () -> Void = {}
     /// Marks an assignment Completed in Blackbaud. Returns nil on success, or why it failed.
     @ObservationIgnored var blackbaudMarker: (TaxTask) async -> String? = { _ in "Blackbaud isn't connected." }
@@ -448,6 +465,99 @@ final class AppModel {
         for note in result.notes { store.log("FEED \(note)") }
         if !result.added.isEmpty { onImported(result.added) }
         tick()
+    }
+
+    // MARK: Assignment details
+
+    /// Loads an imported assignment's page from Blackbaud (once, unless `force`).
+    func loadDetails(_ taskID: UUID, force: Bool = false) {
+        guard let task = task(taskID), task.isFromBlackbaud, feedURL != nil else { return }
+        switch details[taskID] {
+        case .loading: return
+        case .loaded where !force: return
+        default: break
+        }
+        details[taskID] = .loading
+        Task {
+            switch await self.blackbaudDetails(task) {
+            case let .success(page): self.details[taskID] = .loaded(page)
+            case let .failure(problem): self.details[taskID] = .failed(problem.message, signedOut: problem.signedOut)
+            }
+        }
+    }
+
+    /// After signing in, reload the pages that failed because you were signed out.
+    func retrySignedOutDetails() {
+        for (id, state) in details {
+            if case .failed(_, signedOut: true) = state { loadDetails(id, force: true) }
+        }
+    }
+
+    /// Files on the school's site download with your Blackbaud sign-in into your Downloads folder, then open
+    /// in their usual app. Anything else, or a file that won't download, opens in the browser.
+    func openAttachment(_ file: AssignmentDetails.Attachment, taskID: UUID) {
+        guard let host = feedURL?.host, AssignmentDetailsParser.isOnSchoolSite(file.url, host: host) else {
+            open(file.url)
+            return
+        }
+        downloading.insert(file.id)
+        Task {
+            let result = await self.blackbaudDownload(file.url)
+            self.downloading.remove(file.id)
+            switch result {
+            case let .success(data):
+                do {
+                    self.open(try self.saveDownload(data, named: file.fileName, from: file.url))
+                } catch {
+                    self.store.log("ATTACHMENT couldn't save \(file.fileName): \(error.localizedDescription)")
+                    self.open(file.url)
+                }
+            case let .failure(problem):
+                self.store.log("ATTACHMENT couldn't download \(file.fileName): \(problem.message)")
+                self.open(file.url)
+            }
+        }
+    }
+
+    /// Saves like a browser would: into Downloads, as "Name 2.pdf" if "Name.pdf" is already there with
+    /// something else in it. Opening the same file again reuses the copy already there.
+    func saveDownload(_ data: Data, named raw: String, from source: URL, into folder: URL? = nil) throws -> URL {
+        let fm = FileManager.default
+        let folder = folder ?? fm.urls(for: .downloadsDirectory, in: .userDomainMask).first ?? store.dir
+        var name = raw.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+        if name.isEmpty { name = "Attachment" }
+        let base = (name as NSString).deletingPathExtension, ext = (name as NSString).pathExtension
+        for n in 1...50 {
+            let candidate = folder.appendingPathComponent(n == 1 ? name : "\(base) \(n)" + (ext.isEmpty ? "" : ".\(ext)"))
+            if fm.contents(atPath: candidate.path) == data { return candidate }
+            guard !fm.fileExists(atPath: candidate.path) else { continue }
+            try data.write(to: candidate, options: .withoutOverwriting)
+            // Marked as downloaded from the web, like a browser marks its downloads.
+            var values = URLResourceValues()
+            values.quarantineProperties = [kLSQuarantineTypeKey as String: kLSQuarantineTypeWebDownload,
+                                           kLSQuarantineDataURLKey as String: source,
+                                           kLSQuarantineAgentNameKey as String: "Tax Collector"]
+            var saved = candidate
+            try? saved.setResourceValues(values)
+            return candidate
+        }
+        throw CocoaError(.fileWriteFileExists)
+    }
+
+    /// Opens a file or web link. During a lock, apps that aren't allowed get closed, so anything that would
+    /// open in one (Preview, another browser) opens in Arc instead. Office files open in Office, which is allowed.
+    func open(_ url: URL) {
+        let workspace = NSWorkspace.shared
+        if lock.isLocked,
+           let app = workspace.urlForApplication(toOpen: url),
+           let id = Bundle(url: app)?.bundleIdentifier,
+           !Allowlist.isAllowed(bundleID: id, extra: settings.extraAllowedBundleIDs, selfID: selfBundleID),
+           let arc = workspace.urlForApplication(withBundleIdentifier: "company.thebrowser.Browser") {
+            workspace.open([url], withApplicationAt: arc, configuration: NSWorkspace.OpenConfiguration())
+        } else {
+            workspace.open(url)
+        }
     }
 
     // MARK: More time

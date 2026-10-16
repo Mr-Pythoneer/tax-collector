@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private var statusItem: NSStatusItem!
     private var mainWindow: NSWindow?
     private var lockWindow: NSWindow?
+    private var detailWindows: [UUID: NSWindow] = [:]
     private var banner: NSPanel?
     private var bannerHide: DispatchWorkItem?
     private var statusTimer: Timer?
@@ -19,6 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private var canQuitFreely = false
     /// Test runs (separate data folder) never install anything unless TAXCOLLECTOR_TEST_SETUP=1.
     private var setupAllowed = true
+    /// A test copy with its own data folder. It mustn't change anything of the installed copy's, like window sizes.
+    private var isTestCopy = false
 
     private static let showNotification = Notification.Name(AppModel.label + ".show")
 
@@ -28,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         let testing = !(env["TAXCOLLECTOR_DATA_DIR"] ?? "").isEmpty
         canQuitFreely = dryRun || env["TAXCOLLECTOR_ALLOW_QUIT"] == "1"
         setupAllowed = !testing || env["TAXCOLLECTOR_TEST_SETUP"] == "1"
+        isTestCopy = testing
         if !testing { enforceSingleInstance() }
 
         model = AppModel(store: Store(), dryRun: dryRun)
@@ -61,9 +65,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         }
         blackbaudLink.onSignedInChange = { [weak self] signedIn in
             self?.model.blackbaudSignedIn = signedIn
-            if signedIn { runProbe() }
+            if signedIn {
+                runProbe()
+                self?.model.retrySignedOutDetails()
+            }
         }
         model.onFinishSetup = { [weak self] in self?.finishSetup() }
+        model.onOpenDetails = { [weak self] in self?.openDetails($0) }
+        model.blackbaudDetails = { [weak self] task in
+            guard let self else { return .failure(.init(message: "Tax Collector is shutting down.")) }
+            // Testing aid: show a saved assignment page instead of asking Blackbaud.
+            if let sample = env["TAXCOLLECTOR_TEST_DETAILS_JSON"], !sample.isEmpty,
+               let data = FileManager.default.contents(atPath: sample),
+               let json = try? JSONSerialization.jsonObject(with: data),
+               let page = AssignmentDetailsParser.parse(json, indexID: ((json as? [String: Any])?["AssignmentIndexId"] as? Int) ?? 1,
+                                                        host: self.model.feedURL?.host ?? "school.myschoolapp.com") {
+                return .success(page)
+            }
+            self.blackbaudLink.configure(feedURL: self.model.feedURL)
+            return await BlackbaudAPI.details(for: task, link: self.blackbaudLink)
+        }
+        model.blackbaudDownload = { [weak self] url in
+            guard let self else { return .failure(.init(message: "Tax Collector is shutting down.")) }
+            return await BlackbaudAPI.download(url, link: self.blackbaudLink)
+        }
         model.onBlackbaudSignIn = { [weak self] in
             guard let self else { return }
             self.blackbaudLink.configure(feedURL: self.model.feedURL)
@@ -216,7 +241,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         case "blackbaud": .blackbaud
         default: nil
         }
-        if parts[0] == "lock" {
+        if parts[0] == "details", let task {
+            openDetails(task.id)
+        } else if parts[0] == "lock" {
             showLockWindow()
         } else if let sheet {
             showMain()
@@ -322,10 +349,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             let view = MainView(openLockWindow: { [weak self] in self?.showLockWindow() })
             mainWindow = makeWindow(title: "Tax Collector", size: NSSize(width: 680, height: 620),
                                     closable: true, toolbar: true, content: view)
-            mainWindow?.setFrameAutosaveName("TaxCollectorMain")
+            if !isTestCopy { mainWindow?.setFrameAutosaveName("TaxCollectorMain") }
         }
         NSApp.activate()
         mainWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// One window per assignment, so you can keep its instructions open while you work.
+    func openDetails(_ taskID: UUID) {
+        guard let task = model.task(taskID) else { return }
+        let window = detailWindows[taskID] ?? makeWindow(
+            title: Agenda.courseAndTitle(task).title, size: NSSize(width: 620, height: 660), closable: true, toolbar: false,
+            content: AssignmentDetailView(taskID: taskID))
+        detailWindows[taskID] = window
+        model.loadDetails(taskID)
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
     }
 
     private func showLockWindow() {

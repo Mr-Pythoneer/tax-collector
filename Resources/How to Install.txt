@@ -47,6 +47,9 @@ GOOD TO KNOW
   asked to quit, then closed after 10 seconds.
 - A task is locked in 24 hours before it's due. After that, only your
   guardian can change or delete it.
+- Click a task to see everything about it. For Blackbaud assignments
+  that includes the full instructions and the teacher's files and links
+  (sign in to Blackbaud in Tax Collector first).
 - With a good track record (5 finished tasks in the last 30 days, 80% on
   time), you can ask Claude for up to 12 more hours before a deadline:
   right-click the task, or use "Need more time?" in Submit Proof.

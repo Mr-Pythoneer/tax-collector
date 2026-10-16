@@ -8,10 +8,24 @@ import WebKit
 /// requests are made from inside a Blackbaud page, exactly like the website makes them.
 @MainActor
 final class BlackbaudLink: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate {
-    enum CallError: Error {
+    enum CallError: LocalizedError {
         case noHost
         case pageDidNotLoad
         case script(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .noHost: "Turn on Blackbaud import first, so Tax Collector knows your school's address."
+            case .pageDidNotLoad: "Blackbaud's site didn't load. Check your internet connection."
+            case let .script(message): "Blackbaud didn't answer: \(message)"
+            }
+        }
+    }
+
+    /// Why something from Blackbaud didn't work, for showing to you.
+    struct Failure: Error, Equatable {
+        var message: String
+        var signedOut = false
     }
 
     struct Response {
@@ -212,6 +226,31 @@ final class BlackbaudLink: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
             guard let dict = result as? [String: Any] else { throw CallError.script("No answer from the page.") }
             let status = (dict["status"] as? NSNumber)?.intValue ?? 0
             return Response(status: status, body: dict["body"] as? String ?? "")
+        } catch let error as CallError {
+            throw error
+        } catch {
+            throw CallError.script(error.localizedDescription)
+        }
+    }
+
+    /// Downloads a file from the school's site with your sign-in. Base64 through the page, since `fetch`
+    /// only hands back bytes inside the page.
+    func download(_ url: URL) async throws -> (status: Int, data: Data) {
+        let web = try await readyWorker()
+        let script = """
+        const r = await fetch(url, { credentials: 'include' });
+        const bytes = new Uint8Array(await r.arrayBuffer());
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        }
+        return { status: r.status, body: btoa(binary) };
+        """
+        do {
+            let result = try await web.callAsyncJavaScript(script, arguments: ["url": url.absoluteString], in: nil, contentWorld: .page)
+            guard let dict = result as? [String: Any], let body = dict["body"] as? String,
+                  let data = Data(base64Encoded: body) else { throw CallError.script("No file came back.") }
+            return ((dict["status"] as? NSNumber)?.intValue ?? 0, data)
         } catch let error as CallError {
             throw error
         } catch {

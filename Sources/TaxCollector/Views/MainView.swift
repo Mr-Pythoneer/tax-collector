@@ -348,7 +348,10 @@ struct TaskRow: View {
                 .frame(minWidth: 110, alignment: .trailing)
         }
         .padding(.vertical, 5)
+        .opensDetails(task.id)
         .contextMenu {
+            Button("Show Details…") { model.onOpenDetails(task.id) }
+            Divider()
             if task.isPending { Button("Edit…") { router.mainSheet = .edit(task.id) } }
             if task.isPending && task.dueDate > model.now {
                 Button("Ask for More Time…") { router.mainSheet = .extend(task.id) }
@@ -462,7 +465,10 @@ struct CompletedRow: View {
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 44, alignment: .trailing)
         }
+        .opensDetails(task.id)
         .contextMenu {
+            Button("Show Details…") { model.onOpenDetails(task.id) }
+            Divider()
             Button("Delete", role: .destructive) {
                 if model.delete(task.id) == .needsGuardian { router.mainSheet = .guardian }
             }

@@ -127,6 +127,10 @@ private struct OverdueRow: View {
             }
         }
         .padding(.vertical, 4)
+        .opensDetails(task.id)
+        .contextMenu {
+            Button("Show Details…") { model.onOpenDetails(task.id) }
+        }
     }
 }
 
