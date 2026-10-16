@@ -2,7 +2,7 @@
 
 A Mac menu-bar app that holds you to your own deadlines. Add a task and a due date. Before the deadline, pay with proof: a screenshot, photo or file. Claude checks that the proof really shows the task done. If nothing is accepted by the deadline, every app except your allowed ones gets closed until you pay.
 
-**[Download Tax Collector (.dmg)](https://github.com/Mr-Pythoneer/tax-collector/releases/latest/download/TaxCollector.dmg)** for Macs with Apple silicon (M1 or newer) and macOS 14 or later. It's the newest version; the steps to install it are [below](#install-from-the-disk-image) and inside the disk image.
+**[Download Tax Collector (.dmg)](https://github.com/Mr-Pythoneer/tax-collector/releases/latest/download/TaxCollector.dmg)** for Macs with Apple silicon (M1 or newer) and macOS 14 or later. It's the newest version; the steps to install it are [below](#install-from-the-disk-image) and inside the disk image, and so is [how to uninstall it](#uninstall).
 
 **Allowed during a lock:** Arc, Claude, Word, Excel, PowerPoint, Outlook, OneNote, Teams, OneDrive, Mail, Zoom, VooV Meeting, Activity Monitor (plus Finder and a few system helpers).
 
@@ -50,6 +50,37 @@ claude auth login
 `./scripts/make-dmg.sh` builds the disk image as `build.noindex/TaxCollector.dmg`, with `Resources/How to Install.txt` inside it. Build output goes in `build.noindex/` so Spotlight lists only the installed app.
 
 To publish a version, attach that file to a GitHub release (`gh release create v<version> build.noindex/TaxCollector.dmg`). Keep the name `TaxCollector.dmg`: the download link at the top of this page asks for that name from the latest release.
+
+## Uninstall
+
+Uninstalling makes things easier on you, so like every other way out it takes the guardian code. It works during a lock too.
+
+1. Open **Guardian…** from the menu bar icon (or the **Guardian** button in the main window, or on the lock screen) and enter the code.
+2. Under **Maintenance**, click **Uninstall Tax Collector…**, then **Uninstall**.
+
+Tax Collector stops, no longer starts at login, and moves itself to the Trash. Your tasks and proofs stay in `~/Library/Application Support/TaxCollector`, in case you reinstall.
+
+**To remove everything,** including the saved Blackbaud sign-in and the Claude token, delete what it leaves behind:
+
+```bash
+rm -rf "$HOME/Library/Application Support/TaxCollector" \
+       "$HOME/Library/WebKit/io.github.mrpythoneer.taxcollector" \
+       "$HOME/Library/HTTPStorages/io.github.mrpythoneer.taxcollector.binarycookies" \
+       "$HOME/Library/Caches/io.github.mrpythoneer.taxcollector" \
+       "$HOME/Library/Logs/TaxCollector.log"
+defaults delete io.github.mrpythoneer.taxcollector
+```
+
+Without Terminal, use **Go → Go to Folder…** in Finder to open each of those folders and drag the Tax Collector items to the Trash.
+
+**Lost the guardian code?** When nothing is locked, you can remove it from Terminal instead (during a lock, Terminal gets closed):
+
+```bash
+launchctl bootout "gui/$(id -u)/io.github.mrpythoneer.taxcollector"
+rm "$HOME/Library/LaunchAgents/io.github.mrpythoneer.taxcollector.plist"
+```
+
+Then drag Tax Collector from Applications to the Trash. If you built it from source, `./scripts/uninstall.sh` does all of this; add `--purge` to delete your tasks and proofs too.
 
 ## Build and install
 

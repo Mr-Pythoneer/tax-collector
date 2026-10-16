@@ -57,5 +57,12 @@ GOOD TO KNOW
 
 UNINSTALL
 
-Guardian Settings > Uninstall Tax Collector. It stops the app and moves it
-to the Trash. Your tasks stay in ~/Library/Application Support/TaxCollector.
+Click the menu bar icon, choose "Guardian…" and enter the guardian code.
+Under Maintenance, click "Uninstall Tax Collector…". It stops the app,
+removes it from login and moves it to the Trash.
+
+Your tasks stay in ~/Library/Application Support/TaxCollector. Delete
+that folder too if you want everything gone.
+
+How to remove the rest, or remove it without the guardian code:
+https://github.com/Mr-Pythoneer/tax-collector#uninstall
