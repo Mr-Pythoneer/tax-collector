@@ -116,6 +116,8 @@ public struct TaxTask: Codable, Identifiable, Equatable, Sendable {
     public var blackbaudMark: BlackbaudMark?
     /// Requests for more time. Optional so older saved tasks still load.
     public var extensions: [Extension]?
+    /// The repeating task this is one week's copy of.
+    public var seriesID: UUID?
 
     public init(id: UUID = UUID(), title: String, details: String = "", dueDate: Date,
                 createdAt: Date, source: TaskSource = .manual, status: TaskStatus = .pending,

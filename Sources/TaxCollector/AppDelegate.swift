@@ -52,6 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         model.onPaid = { [weak self] task in
             self?.notify("Proof accepted", Agenda.courseAndTitle(task).title)
         }
+        model.onRecurred = { [weak self] task in
+            self?.notify("\(Agenda.courseAndTitle(task).title) is due again", "Due \(Fmt.dateTime.string(from: task.dueDate)).")
+        }
         blackbaudLink.sessionFile = model.store.dir.appendingPathComponent("blackbaud-session.plist")
         blackbaudLink.configure(feedURL: model.feedURL)
         // Testing aid: TAXCOLLECTOR_BLACKBAUD_PROBE=1 opens the sign-in window and writes a read-only report.

@@ -922,6 +922,68 @@ struct MoreTime {
     }
 }
 
+struct RepeatRules {
+    var cal: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        c.locale = Locale(identifier: "en_US_POSIX")
+        c.firstWeekday = 2
+        return c
+    }
+    /// October 2026: the 19th and 26th are Mondays.
+    func at(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+        cal.date(from: DateComponents(year: 2026, month: 10, day: day, hour: hour, minute: minute))!
+    }
+
+    func nextDueFindsTheRightDay() {
+        let monday = 2, wednesday = 4, halfPastEight = 8 * 60 + 30
+        expect(Recurrence.nextDue(after: at(19, 8), weekdays: [monday], minuteOfDay: halfPastEight, calendar: cal) == at(19, 8, 30))
+        expect(Recurrence.nextDue(after: at(19, 9), weekdays: [monday], minuteOfDay: halfPastEight, calendar: cal) == at(26, 8, 30))
+        expect(Recurrence.nextDue(after: at(19, 9), weekdays: [monday, wednesday], minuteOfDay: halfPastEight, calendar: cal) == at(21, 8, 30))
+        // Exactly at the deadline, it's next week's.
+        expect(Recurrence.nextDue(after: at(19, 8, 30), weekdays: [monday], minuteOfDay: halfPastEight, calendar: cal) == at(26, 8, 30))
+        expect(Recurrence.nextDue(after: at(19, 9), weekdays: [], minuteOfDay: 0, calendar: cal) == nil)
+    }
+
+    func oneCopyAtATime() {
+        let series = RecurringTask(title: "Math: homework", weekdays: [2], minuteOfDay: 8 * 60 + 30, createdAt: at(17, 12))
+        let first = Recurrence.newCopies(of: [series], now: at(17, 12), calendar: cal)
+        expect(first.tasks.count == 1 && first.tasks.first?.dueDate == at(19, 8, 30) && first.tasks.first?.seriesID == series.id)
+        expect(first.series.first?.currentDue == at(19, 8, 30))
+        // Paid early or not, nothing new before Monday's deadline…
+        expect(Recurrence.newCopies(of: first.series, now: at(19, 8, 29), calendar: cal).tasks.isEmpty)
+        // …and right after it, next week's.
+        expect(Recurrence.newCopies(of: first.series, now: at(19, 8, 31), calendar: cal).tasks.map(\.dueDate) == [at(26, 8, 30)])
+        // Weeks later, only the next one: no backlog of missed weeks.
+        let later = at(19, 9).addingTimeInterval(20 * 86400)
+        let gap = Recurrence.newCopies(of: first.series, now: later, calendar: cal)
+        expect(gap.tasks.count == 1 && gap.tasks[0].dueDate > later)
+    }
+
+    func scheduleReads() {
+        func text(_ days: Set<Int>) -> String {
+            RecurringTask(title: "x", weekdays: days, minuteOfDay: 8 * 60 + 30, createdAt: at(17, 12))
+                .schedule(calendar: cal).replacingOccurrences(of: "\u{202F}", with: " ")
+        }
+        expect(text([2]) == "Every Monday at 8:30 AM")
+        expect(text([4, 2]) == "Every Monday and Wednesday at 8:30 AM")
+        expect(text([2, 4, 6]) == "Every Monday, Wednesday and Friday at 8:30 AM")
+        expect(text([1, 2]) == "Every Monday and Sunday at 8:30 AM")
+        expect(text(Set(2...6)) == "Every weekday at 8:30 AM")
+        expect(text(Set(1...7)) == "Every day at 8:30 AM")
+    }
+
+    func savesAndOldTasksStillLoad() {
+        var task = TaxTask(title: "x", dueDate: t0, createdAt: t0)
+        task.seriesID = UUID()
+        let data = try? JSONEncoder().encode(task)
+        expect(data.flatMap { try? JSONDecoder().decode(TaxTask.self, from: $0) }?.seriesID == task.seriesID)
+        let series = RecurringTask(title: "x", weekdays: [2, 4], minuteOfDay: 510, createdAt: t0, currentDue: t0)
+        let saved = try? JSONEncoder().encode(series)
+        expect(saved.flatMap { try? JSONDecoder().decode(RecurringTask.self, from: $0) } == series)
+    }
+}
+
 struct AssignmentPage {
     let host = "school.myschoolapp.com"
     var sample: [String: Any] {
@@ -966,6 +1028,10 @@ struct AssignmentPage {
 
 let checks: [(String, () -> Void)] = [
     ("MatchRules.movedDeadlineStillMatches", { MatchRules().movedDeadlineStillMatches() }),
+    ("RepeatRules.nextDueFindsTheRightDay", { RepeatRules().nextDueFindsTheRightDay() }),
+    ("RepeatRules.oneCopyAtATime", { RepeatRules().oneCopyAtATime() }),
+    ("RepeatRules.scheduleReads", { RepeatRules().scheduleReads() }),
+    ("RepeatRules.savesAndOldTasksStillLoad", { RepeatRules().savesAndOldTasksStillLoad() }),
     ("AssignmentPage.parsesEverything", { AssignmentPage().parsesEverything() }),
     ("AssignmentPage.urlsAndSites", { AssignmentPage().urlsAndSites() }),
     ("MoreTime.trackRecordCounts", { MoreTime().trackRecordCounts() }),

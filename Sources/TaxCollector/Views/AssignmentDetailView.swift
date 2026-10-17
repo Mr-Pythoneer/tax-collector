@@ -74,6 +74,11 @@ struct AssignmentDetailView: View {
             }
             .font(.callout.monospacedDigit())
             .foregroundStyle(.secondary)
+            if let series = model.series(of: task) {
+                Label(series.schedule(), systemImage: "repeat")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
             if case let .loaded(page) = model.details[taskID], !page.type.isEmpty || page.maxPoints != nil {
                 Text([page.type.isEmpty ? nil : page.type,
                       page.maxPoints.map(pointsText),

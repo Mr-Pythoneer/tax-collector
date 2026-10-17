@@ -447,6 +447,41 @@ enum SelfTest {
         let marked = (try? first?.resourceValues(forKeys: [.quarantinePropertiesKey]))?.quarantineProperties
         check("files: marked as downloaded from the web", marked != nil)
 
+        // Weekly repeats: one copy at a time, the next once the deadline has passed.
+        // The app's clock jumps ahead here, under a guardian unlock so nothing really locks.
+        model.settings.overrideUntil = Date().addingTimeInterval(600)
+        let calendar = Calendar.current
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: model.now)!
+        model.addRecurring(title: "Repeat: homework", details: "Exercises",
+                           weekdays: [calendar.component(.weekday, from: tomorrow)], minuteOfDay: 8 * 60)
+        let seriesID = model.recurring.first { $0.title == "Repeat: homework" }?.id
+        func copies() -> [TaxTask] { model.tasks.filter { $0.seriesID != nil && $0.seriesID == seriesID } }
+        let firstDue = calendar.date(bySettingHour: 8, minute: 0, second: 0, of: tomorrow)!
+        check("repeat: the first copy is out, due on the right day",
+              copies().count == 1 && copies().first?.dueDate == firstDue, "\(copies().map(\.dueDate))")
+        if let first = copies().first, let i = model.tasks.firstIndex(where: { $0.id == first.id }) {
+            model.tasks[i].status = .proven(at: model.now)
+            model.tick()
+            check("repeat: paying early doesn't bring the next one forward", copies().count == 1)
+            model.settings.lastSeen = firstDue.addingTimeInterval(60)
+            model.tick()
+            let next = copies().filter(\.isPending)
+            check("repeat: after the deadline, next week's copy appears",
+                  copies().count == 2 && next.first?.dueDate == calendar.date(byAdding: .day, value: 7, to: firstDue),
+                  "\(copies().map(\.dueDate))")
+            if let n = next.first { _ = model.delete(n.id) }
+            model.tick()
+            check("repeat: deleting a copy doesn't bring it straight back", copies().count == 1)
+            if let id = seriesID { model.stopRepeating(id) }
+            model.tick()
+            check("repeat: stopping keeps the copies already out",
+                  model.recurring.isEmpty && model.store.loadRecurring().isEmpty && copies().count == 1)
+        }
+        for t in copies() { _ = model.delete(t.id, guardianApproved: true) }
+        model.resetClockGuard()
+        model.settings.overrideUntil = nil
+        model.tick()
+
         // Everything ends up on disk
         let saved = model.store.loadTasks()
         check("storage: tasks on disk match the app", Set(saved.map(\.id)) == Set(model.tasks.map(\.id)))

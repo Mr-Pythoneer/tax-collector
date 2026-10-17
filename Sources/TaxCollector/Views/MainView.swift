@@ -151,6 +151,13 @@ struct TaskListView: View {
                     Text("Waiting for Last Check").font(.headline).foregroundStyle(.primary)
                 }
             }
+            if !model.recurring.isEmpty {
+                Section {
+                    ForEach(model.recurring) { RepeatRow(series: $0) }
+                } header: {
+                    Text("Repeating").font(.headline).foregroundStyle(.primary)
+                }
+            }
             if !completed.isEmpty {
                 Section {
                     DisclosureGroup(isExpanded: $showCompleted) {
@@ -319,6 +326,12 @@ struct TaskRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     Text(parts.title).fontWeight(.medium)
+                    if task.seriesID != nil {
+                        Image(systemName: "repeat")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .help(model.series(of: task)?.schedule() ?? "Repeated weekly (stopped)")
+                    }
                     if task.isPending && model.isFrozen(task) {
                         Image(systemName: "lock.fill")
                             .font(.caption2)
@@ -358,6 +371,9 @@ struct TaskRow: View {
             if task.isPending { Button("Edit…") { router.mainSheet = .edit(task.id) } }
             if task.isPending && task.dueDate > model.now {
                 Button("Ask for More Time…") { router.mainSheet = .extend(task.id) }
+            }
+            if let series = model.series(of: task) {
+                Button("Stop Repeating") { model.stopRepeating(series.id) }
             }
             Button("Delete", role: .destructive) {
                 if model.delete(task.id) == .needsGuardian { router.mainSheet = .guardian }
@@ -437,6 +453,27 @@ struct TaskRow: View {
             Button("Try Again…") { router.mainSheet = .lastCheck(task.id) }
                 .controlSize(.small)
         }
+    }
+}
+
+/// A task that comes back every week: its schedule, and a way to stop it.
+struct RepeatRow: View {
+    @Environment(AppModel.self) private var model
+    let series: RecurringTask
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "repeat").foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(series.title)
+                Text(series.schedule()).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Stop Repeating") { model.stopRepeating(series.id) }
+                .controlSize(.small)
+                .help("No more copies. The one that's out now stays.")
+        }
+        .padding(.vertical, 2)
     }
 }
 

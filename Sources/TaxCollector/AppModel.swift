@@ -50,6 +50,8 @@ final class AppModel {
     var checking: Set<UUID> = []
     var auditorStatus = "Checking…"
     var blackbaud: BlackbaudState
+    /// Tasks that come back every week.
+    var recurring: [RecurringTask]
     var feedSyncing = false
     var feedError: String?
     var blackbaudSignedIn = false
@@ -65,6 +67,8 @@ final class AppModel {
     @ObservationIgnored var onClosedApp: (String) -> Void = { _ in }
     @ObservationIgnored var onPaid: (TaxTask) -> Void = { _ in }
     @ObservationIgnored var onImported: ([TaxTask]) -> Void = { _ in }
+    /// A repeating task's new copy just appeared.
+    @ObservationIgnored var onRecurred: (TaxTask) -> Void = { _ in }
     /// Opens the Blackbaud sign-in window.
     @ObservationIgnored var onBlackbaudSignIn: () -> Void = {}
     /// Moves the app into Applications if needed, then sets it to run in the background.
@@ -98,6 +102,7 @@ final class AppModel {
         settings = store.loadSettings()
         guardian = store.loadGuardian()
         blackbaud = store.loadBlackbaud()
+        recurring = store.loadRecurring()
         enforcer = Enforcer(dryRun: dryRun)
         now = LockPolicy.effectiveNow(systemNow: Date(), lastSeen: settings.lastSeen)
 
@@ -168,6 +173,7 @@ final class AppModel {
             lastClockSave = now
         }
 
+        bringBackRepeats()
         lock = LockPolicy.state(tasks: tasks, overrideUntil: settings.overrideUntil, now: now)
         if lock.isLocked != wasLocked {
             wasLocked = lock.isLocked
@@ -231,6 +237,46 @@ final class AppModel {
         save()
         store.log("TASK added \"\(t.title)\" due \(t.dueDate)")
         tick()
+    }
+
+    /// A task that comes back every week on `weekdays` at `minuteOfDay`. The first copy appears now.
+    func addRecurring(title: String, details: String, weekdays: Set<Int>, minuteOfDay: Int) {
+        let series = RecurringTask(title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                                   details: details.trimmingCharacters(in: .whitespacesAndNewlines),
+                                   weekdays: weekdays, minuteOfDay: minuteOfDay, createdAt: now)
+        recurring.append(series)
+        store.saveRecurring(recurring)
+        store.log("REPEAT added \"\(series.title)\": \(series.schedule())")
+        tick()
+    }
+
+    /// No more copies. The ones already out stay, with the usual rules.
+    func stopRepeating(_ seriesID: UUID) {
+        guard let i = recurring.firstIndex(where: { $0.id == seriesID }) else { return }
+        let series = recurring.remove(at: i)
+        store.saveRecurring(recurring)
+        store.log("REPEAT stopped \"\(series.title)\"")
+    }
+
+    func series(of task: TaxTask) -> RecurringTask? {
+        task.seriesID.flatMap { id in recurring.first { $0.id == id } }
+    }
+
+    /// Puts out the next copy of each repeating task whose current copy's deadline has passed.
+    private func bringBackRepeats() {
+        guard !recurring.isEmpty else { return }
+        let brandNew = Set(recurring.filter { $0.currentDue == nil }.map(\.id))
+        let (copies, updated) = Recurrence.newCopies(of: recurring, now: now)
+        guard !copies.isEmpty else { return }
+        recurring = updated
+        tasks.append(contentsOf: copies)
+        store.saveRecurring(recurring)
+        save()
+        for copy in copies {
+            store.log("TASK repeated \"\(copy.title)\" due \(copy.dueDate)")
+            // You just made the first one, so only later weeks get a notification.
+            if let id = copy.seriesID, !brandNew.contains(id) { onRecurred(copy) }
+        }
     }
 
     func saveEdit(_ edited: TaxTask, guardianApproved: Bool = false) -> EditResult {

@@ -13,6 +13,7 @@ The main window lists what's due, soonest first, grouped by day (Overdue, Today,
 - **Classes:** Blackbaud assignments show their class under the title, with a coloured dot. Each class keeps its colour.
 - **Notices:** problems show at the top of the list: the lock, a guardian unlock, proof checking not working, or Blackbaud import failing.
 - **Below the list:** paid Blackbaud work waiting for its last check comes after the days. Finished tasks fold into **Completed**.
+- **Repeating tasks:** in **New Task**, turn on **Repeats every week** and pick the days and the time, like homework for a class you have every Monday. One copy is out at a time. The next appears once that copy's deadline has passed, even if you paid early, and a copy that's due needs its own proof like any task. If the Mac was off for weeks, only the next copy appears, not a pile of missed ones. **Stop Repeating** (in the **Repeating** section, or a copy's right-click menu) ends it; the copy that's out stays.
 - **Details:** click a task (or right-click → **Show Details…**) to open it in its own window: what to do, the teacher's files and links for Blackbaud assignments, and your proof so far. It can stay open next to your work.
 
 The app is light by default. **Appearance** in the menu bar menu switches to Dark or Match System.
@@ -127,6 +128,7 @@ TAXCOLLECTOR_DATA_DIR=/tmp/tc-test TAXCOLLECTOR_DRY_RUN=1 "build.noindex/Tax Col
 Everything lives in `~/Library/Application Support/TaxCollector/`:
 
 - `tasks.json` and `settings.json` (which holds the Blackbaud feed link)
+- `recurring.json`, which holds your repeating tasks and when each one's current copy is due
 - `blackbaud.json`, which holds what the feed last said about each imported assignment and which ones you deleted
 - `blackbaud-session.plist`, which holds your Blackbaud sign-in so it survives restarts. It's readable only by your account, and **Sign out** deletes it.
 - `guardian.json`, which holds only a salted PBKDF2 hash of the code
