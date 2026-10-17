@@ -239,11 +239,14 @@ final class AppModel {
         tick()
     }
 
-    /// A task that comes back every week on `weekdays` at `minuteOfDay`. The first copy appears now.
-    func addRecurring(title: String, details: String, weekdays: Set<Int>, minuteOfDay: Int) {
+    /// A task that comes back every `interval` days, or every `interval` weeks on `weekdays`, at `minuteOfDay`,
+    /// starting on `startDate`. The first copy appears now.
+    func addRecurring(title: String, details: String, unit: RepeatUnit = .weeks, interval: Int = 1,
+                      weekdays: Set<Int>, minuteOfDay: Int, startDate: Date? = nil) {
         let series = RecurringTask(title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                                    details: details.trimmingCharacters(in: .whitespacesAndNewlines),
-                                   weekdays: weekdays, minuteOfDay: minuteOfDay, createdAt: now)
+                                   unit: unit, interval: interval, weekdays: unit == .weeks ? weekdays : [],
+                                   minuteOfDay: minuteOfDay, startDate: startDate ?? now, createdAt: now)
         recurring.append(series)
         store.saveRecurring(recurring)
         store.log("REPEAT added \"\(series.title)\": \(series.schedule())")

@@ -34,7 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         canQuitFreely = dryRun || env["TAXCOLLECTOR_ALLOW_QUIT"] == "1"
         setupAllowed = !testing || env["TAXCOLLECTOR_TEST_SETUP"] == "1"
         isTestCopy = testing
-        isSelfTest = testing && env["TAXCOLLECTOR_SELFTEST"] == "1"
+        let snapshotPath = testing ? env["TAXCOLLECTOR_TEST_SNAPSHOT"].flatMap { $0.isEmpty ? nil : $0 } : nil
+        isSelfTest = testing && (env["TAXCOLLECTOR_SELFTEST"] == "1" || snapshotPath != nil)
         if !testing { enforceSingleInstance() }
 
         model = AppModel(store: Store(), dryRun: dryRun)
@@ -136,7 +137,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             self.notify(title, body)
         }
 
-        setUpStatusItem()
+        // A snapshot run stays completely out of sight: no menu bar icon either.
+        if snapshotPath == nil { setUpStatusItem() }
         setUpNotifications()
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.willPowerOffNotification, object: nil, queue: .main
@@ -152,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
         model.start()
         let startedAtLogin = CommandLine.arguments.contains("--launchd")
-        if model.guardian == nil || !startedAtLogin { showMain() }
+        if snapshotPath == nil && (model.guardian == nil || !startedAtLogin) { showMain() }
         refreshSetupNeed()
         if startedAtLogin && model.settings.justSetUp {
             model.settings.justSetUp = false
@@ -166,7 +168,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
         // Testing aids: open one sheet for a screenshot, or run the self-test and quit.
         if let spec = env["TAXCOLLECTOR_TEST_SHEET"], !spec.isEmpty {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.openTestSheet(spec) }
+            if let snapshotPath {
+                snapshot(spec, to: snapshotPath)
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.openTestSheet(spec) }
+            }
         }
         if env["TAXCOLLECTOR_SELFTEST"] == "1" {
             Task {
@@ -234,6 +240,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     /// `TAXCOLLECTOR_TEST_SHEET=name` or `name:part of a task title`.
     private func openTestSheet(_ spec: String) {
+        let (kind, sheet, task) = testScreen(spec)
+        if kind == "details", let task {
+            openDetails(task.id)
+        } else if kind == "lock" {
+            showLockWindow()
+        } else if let sheet {
+            showMain()
+            router.mainSheet = sheet
+        }
+    }
+
+    /// Testing aid, with `TAXCOLLECTOR_TEST_SNAPSHOT=/path/to.png` in a test copy: draws the screen that
+    /// `TAXCOLLECTOR_TEST_SHEET` names into a window that's never shown, saves it as a PNG and quits.
+    /// So a screen can be checked while you're using the Mac, without anything popping up.
+    private func snapshot(_ spec: String, to path: String) {
+        let (kind, sheet, task) = testScreen(spec)
+        let content: AnyView
+        var size: NSSize?
+        if kind == "details", let task {
+            content = AnyView(AssignmentDetailView(taskID: task.id))
+            size = NSSize(width: 620, height: 660)
+        } else if kind == "main" {
+            content = AnyView(MainView(openLockWindow: {}))
+            size = NSSize(width: 680, height: 620)
+        } else if let sheet {
+            content = AnyView(SheetContent(sheet: sheet, dismiss: {}, present: { _ in }))
+        } else {
+            content = AnyView(Text("Nothing to show for \(spec)").padding())
+        }
+        let hosting = NSHostingView(rootView: content
+            .background(Color(nsColor: .windowBackgroundColor))
+            .environment(model)
+            .environment(router))
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size ?? NSSize(width: 600, height: 400)),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            if size == nil { window.setContentSize(hosting.fittingSize) }
+            hosting.layoutSubtreeIfNeeded()
+            if let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) {
+                hosting.cacheDisplay(in: hosting.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+            }
+            self?.model.allowQuit = true
+            NSApp.terminate(nil)
+        }
+    }
+
+    private func testScreen(_ spec: String) -> (kind: String, sheet: Sheet?, task: TaxTask?) {
         let parts = spec.split(separator: ":", maxSplits: 1).map(String.init)
         let task = parts.count > 1
             ? model.tasks.first { $0.title.localizedCaseInsensitiveContains(parts[1]) }
@@ -250,14 +306,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         case "blackbaud": .blackbaud
         default: nil
         }
-        if parts[0] == "details", let task {
-            openDetails(task.id)
-        } else if parts[0] == "lock" {
-            showLockWindow()
-        } else if let sheet {
-            showMain()
-            router.mainSheet = sheet
-        }
+        return (parts[0], sheet, task)
     }
 
     /// Testing aid, only with `TAXCOLLECTOR_TEST_LAST_CHECK=<part of a task title>`: opens that task's

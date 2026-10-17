@@ -47,8 +47,9 @@ GOOD TO KNOW
   asked to quit, then closed after 10 seconds.
 - A task is locked in 24 hours before it's due. After that, only your
   guardian can change or delete it.
-- For homework that comes every week, turn on "Repeats every week" in
-  New Task. The next copy appears once each deadline has passed.
+- For homework that comes back, turn on "Repeats" in New Task: every
+  day, every few days, or on chosen days every week or few weeks. The
+  next copy appears once each deadline has passed.
 - Click a task to see everything about it. For Blackbaud assignments
   that includes the full instructions and the teacher's files and links
   (sign in to Blackbaud in Tax Collector first).

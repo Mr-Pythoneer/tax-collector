@@ -973,6 +973,62 @@ struct RepeatRules {
         expect(text(Set(1...7)) == "Every day at 8:30 AM")
     }
 
+    func everyFewDays() {
+        // Every 4 days from Monday the 19th at 8:30.
+        let series = RepeatRules.series(.days, 4, [], start: at(19, 0), cal: cal)
+        expect(series.nextDue(after: at(19, 8), calendar: cal) == at(19, 8, 30))
+        expect(series.nextDue(after: at(19, 9), calendar: cal) == at(23, 8, 30))
+        expect(series.nextDue(after: at(22, 23), calendar: cal) == at(23, 8, 30))
+        expect(series.nextDue(after: at(23, 8, 30), calendar: cal) == at(27, 8, 30))
+        // Before the start date, the first one is on it.
+        expect(RepeatRules.series(.days, 4, [], start: at(25, 0), cal: cal).nextDue(after: at(19, 9), calendar: cal) == at(25, 8, 30))
+        // Every day.
+        expect(RepeatRules.series(.days, 1, [], start: at(19, 0), cal: cal).nextDue(after: at(19, 9), calendar: cal) == at(20, 8, 30))
+    }
+
+    func everyFewWeeks() {
+        // Every 2 weeks on Monday, starting the week of the 19th: the 26th is skipped.
+        let mondays = RepeatRules.series(.weeks, 2, [2], start: at(19, 0), cal: cal)
+        expect(mondays.nextDue(after: at(19, 8), calendar: cal) == at(19, 8, 30))
+        expect(mondays.nextDue(after: at(19, 9), calendar: cal)
+               == cal.date(from: DateComponents(year: 2026, month: 11, day: 2, hour: 8, minute: 30)))
+        // Monday and Wednesday of every other week.
+        let twice = RepeatRules.series(.weeks, 2, [2, 4], start: at(19, 0), cal: cal)
+        expect(twice.nextDue(after: at(19, 9), calendar: cal) == at(21, 8, 30))
+        expect(twice.nextDue(after: at(21, 9), calendar: cal)
+               == cal.date(from: DateComponents(year: 2026, month: 11, day: 2, hour: 8, minute: 30)))
+        // Starting mid-week counts from that week.
+        expect(RepeatRules.series(.weeks, 2, [2, 4], start: at(21, 0), cal: cal).nextDue(after: at(19, 9), calendar: cal) == at(21, 8, 30))
+    }
+
+    func customScheduleReads() {
+        func text(_ unit: RepeatUnit, _ n: Int, _ days: Set<Int>) -> String {
+            RepeatRules.series(unit, n, days, start: at(19, 0), cal: cal).schedule(calendar: cal)
+                .replacingOccurrences(of: "\u{202F}", with: " ")
+        }
+        expect(text(.days, 1, []) == "Every day at 8:30 AM")
+        expect(text(.days, 4, []) == "Every 4 days at 8:30 AM")
+        expect(text(.weeks, 2, [2]) == "Every 2 weeks on Monday at 8:30 AM")
+        expect(text(.weeks, 3, [2, 4]) == "Every 3 weeks on Monday and Wednesday at 8:30 AM")
+        expect(text(.weeks, 2, Set(2...6)) == "Every 2 weeks on weekdays at 8:30 AM")
+        // Out-of-range intervals are kept sensible.
+        expect(RepeatRules.series(.days, 0, [], start: at(19, 0), cal: cal).interval == 1)
+        expect(RepeatRules.series(.weeks, 500, [2], start: at(19, 0), cal: cal).interval == RecurringTask.maxWeeks)
+    }
+
+    func weeklyRepeatsFromBeforeStillLoad() {
+        // Saved by 0.5.0: no unit, interval or start date.
+        let json = #"{"id":"4D1C8B0E-7F4A-4C11-9E2B-1A2B3C4D5E6F","title":"Math","details":"","weekdays":[2],"minuteOfDay":510,"createdAt":0}"#
+        let old = try? JSONDecoder().decode(RecurringTask.self, from: Data(json.utf8))
+        expect(old?.unit == .weeks && old?.interval == 1 && old?.startDate == old?.createdAt)
+        expect(old?.nextDue(after: at(19, 9), calendar: cal) == at(26, 8, 30))
+    }
+
+    static func series(_ unit: RepeatUnit, _ interval: Int, _ weekdays: Set<Int>, start: Date, cal: Calendar) -> RecurringTask {
+        RecurringTask(title: "x", unit: unit, interval: interval, weekdays: weekdays, minuteOfDay: 8 * 60 + 30,
+                      startDate: start, createdAt: start)
+    }
+
     func savesAndOldTasksStillLoad() {
         var task = TaxTask(title: "x", dueDate: t0, createdAt: t0)
         task.seriesID = UUID()
@@ -1032,6 +1088,10 @@ let checks: [(String, () -> Void)] = [
     ("RepeatRules.oneCopyAtATime", { RepeatRules().oneCopyAtATime() }),
     ("RepeatRules.scheduleReads", { RepeatRules().scheduleReads() }),
     ("RepeatRules.savesAndOldTasksStillLoad", { RepeatRules().savesAndOldTasksStillLoad() }),
+    ("RepeatRules.everyFewDays", { RepeatRules().everyFewDays() }),
+    ("RepeatRules.everyFewWeeks", { RepeatRules().everyFewWeeks() }),
+    ("RepeatRules.customScheduleReads", { RepeatRules().customScheduleReads() }),
+    ("RepeatRules.weeklyRepeatsFromBeforeStillLoad", { RepeatRules().weeklyRepeatsFromBeforeStillLoad() }),
     ("AssignmentPage.parsesEverything", { AssignmentPage().parsesEverything() }),
     ("AssignmentPage.urlsAndSites", { AssignmentPage().urlsAndSites() }),
     ("MoreTime.trackRecordCounts", { MoreTime().trackRecordCounts() }),

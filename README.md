@@ -13,7 +13,7 @@ The main window lists what's due, soonest first, grouped by day (Overdue, Today,
 - **Classes:** Blackbaud assignments show their class under the title, with a coloured dot. Each class keeps its colour.
 - **Notices:** problems show at the top of the list: the lock, a guardian unlock, proof checking not working, or Blackbaud import failing.
 - **Below the list:** paid Blackbaud work waiting for its last check comes after the days. Finished tasks fold into **Completed**.
-- **Repeating tasks:** in **New Task**, turn on **Repeats every week** and pick the days and the time, like homework for a class you have every Monday. One copy is out at a time. The next appears once that copy's deadline has passed, even if you paid early, and a copy that's due needs its own proof like any task. If the Mac was off for weeks, only the next copy appears, not a pile of missed ones. **Stop Repeating** (in the **Repeating** section, or a copy's right-click menu) ends it; the copy that's out stays.
+- **Repeating tasks:** in **New Task**, turn on **Repeats**. Choose **every N days** (1 is every day, 4 is every 4 days) or **every N weeks** on the days you pick (every week on Monday, every 2 weeks on Monday and Wednesday), plus the time and the day it starts. One copy is out at a time. The next appears once that copy's deadline has passed, even if you paid early, and a copy that's due needs its own proof like any task. If the Mac was off for weeks, only the next copy appears, not a pile of missed ones. **Stop Repeating** (in the **Repeating** section, or a copy's right-click menu) ends it; the copy that's out stays.
 - **Details:** click a task (or right-click → **Show Details…**) to open it in its own window: what to do, the teacher's files and links for Blackbaud assignments, and your proof so far. It can stay open next to your work.
 
 The app is light by default. **Appearance** in the menu bar menu switches to Dark or Match System.
@@ -116,6 +116,8 @@ TAXCOLLECTOR_DATA_DIR=/tmp/tc-test TAXCOLLECTOR_DRY_RUN=1 "build.noindex/Tax Col
 - `TAXCOLLECTOR_ENFORCE_ONLY=com.apple.TextEdit,com.apple.calculator` makes a real lock close only those apps. This lets you test real closing without losing anything else you have open.
 - `TAXCOLLECTOR_SELFTEST=1` runs every feature through the app's own code with a fake Claude and a fake Blackbaud. It writes `selftest.txt` and quits. Always use it with a throwaway `TAXCOLLECTOR_DATA_DIR`.
 - `TAXCOLLECTOR_TEST_SHEET=new|edit|proof|lastcheck|extend|details|guardian|blackbaud|auditor|log|lock`, optionally followed by `:part of a task title`, opens that screen at launch for screenshots.
+- `TAXCOLLECTOR_TEST_REPEAT=days:4` (or `weeks:2`) opens New Task with that repeat already filled in.
+- `TAXCOLLECTOR_TEST_SNAPSHOT=/path/to.png` with `TAXCOLLECTOR_TEST_SHEET` draws that screen into a PNG without showing any window or menu bar icon, then quits, so a screen can be checked while someone is using the Mac.
 - `TAXCOLLECTOR_TEST_DETAILS_JSON=/path/to/page.json` makes every assignment's details window show that saved `UserAssignmentDetailsGetAllStudentData` answer instead of asking Blackbaud.
 - `TAXCOLLECTOR_TEST_GUARDIAN_CODE` types a guardian code into the code box. It still has to be the right code.
 - Setup is never run in a test like this unless you add `TAXCOLLECTOR_TEST_SETUP=1`. With it, `TAXCOLLECTOR_TEST_APPLICATIONS_DIR` stands in for the Applications folder, and `TAXCOLLECTOR_LABEL` names the background copy. Launching with `--finish-setup` acts like clicking Finish Setup.

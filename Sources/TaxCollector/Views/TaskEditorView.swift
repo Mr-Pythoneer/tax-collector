@@ -13,8 +13,11 @@ struct TaskEditorView: View {
     @State private var blocked = false
     @State private var loaded = false
     @State private var repeats = false
+    @State private var unit = RepeatUnit.weeks
+    @State private var interval = 1
     @State private var weekdays: Set<Int> = []
     @State private var time = Date()
+    @State private var start = Date()
 
     private var original: TaxTask? { editing.flatMap { model.task($0) } }
     private var frozen: Bool { original.map { model.isFrozen($0) } ?? false }
@@ -28,10 +31,14 @@ struct TaskEditorView: View {
         return (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
     }
 
-    /// When the first copy of a repeating task would be due.
-    private var firstDue: Date? {
-        Recurrence.nextDue(after: model.now, weekdays: weekdays, minuteOfDay: minuteOfDay)
+    /// The repeat as it's set up in the form.
+    private var series: RecurringTask {
+        RecurringTask(title: title, unit: unit, interval: interval, weekdays: weekdays, minuteOfDay: minuteOfDay,
+                      startDate: start, createdAt: model.now)
     }
+
+    /// When the first copy of a repeating task would be due.
+    private var firstDue: Date? { series.nextDue(after: model.now) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -71,18 +78,40 @@ struct TaskEditorView: View {
                         .disabled(frozen)
                 }
                 if editing == nil {
-                    Toggle("Repeats every week", isOn: $repeats)
+                    Toggle("Repeats", isOn: $repeats)
                         .onChange(of: repeats) { _, on in
                             // Start from the day and time already picked.
                             if on && weekdays.isEmpty {
                                 weekdays = [Calendar.current.component(.weekday, from: due)]
-                                time = due
+                                time = Self.quarterHour(due)
+                                start = due
                             }
                         }
                 }
                 if repeats {
-                    LabeledContent("On") { WeekdayPicker(selection: $weekdays) }
+                    LabeledContent("Every") {
+                        HStack(spacing: 6) {
+                            TextField("", value: $interval, format: .number)
+                                .labelsHidden()
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 48)
+                            Stepper("", value: $interval, in: 1...(unit == .days ? RecurringTask.maxDays : RecurringTask.maxWeeks))
+                                .labelsHidden()
+                            Picker("", selection: $unit) {
+                                Text(interval == 1 ? "day" : "days").tag(RepeatUnit.days)
+                                Text(interval == 1 ? "week" : "weeks").tag(RepeatUnit.weeks)
+                            }
+                            .labelsHidden()
+                            .fixedSize()
+                        }
+                    }
+                    if unit == .weeks {
+                        LabeledContent("On") { WeekdayPicker(selection: $weekdays) }
+                    }
                     DatePicker("Due at", selection: $time, displayedComponents: .hourAndMinute)
+                    DatePicker("Starting", selection: $start, in: Calendar.current.startOfDay(for: model.now)...,
+                               displayedComponents: .date)
                 } else {
                     DatePicker("Due", selection: $due, in: model.now..., displayedComponents: [.date, .hourAndMinute])
                     HStack {
@@ -120,12 +149,38 @@ struct TaskEditorView: View {
         .padding(20)
         .frame(width: 480)
         .onAppear(perform: load)
+        .onAppear(perform: presetTestRepeat)
+    }
+
+    /// Testing aid, in a test copy only: `TAXCOLLECTOR_TEST_REPEAT=days:4` or `weeks:2` opens New Task with
+    /// that repeat already set, so the form can be looked at.
+    private func presetTestRepeat() {
+        let env = ProcessInfo.processInfo.environment
+        guard editing == nil, !(env["TAXCOLLECTOR_DATA_DIR"] ?? "").isEmpty,
+              let spec = env["TAXCOLLECTOR_TEST_REPEAT"]?.split(separator: ":"), spec.count == 2,
+              let n = Int(spec[1]) else { return }
+        title = "Math homework"
+        repeats = true
+        unit = spec[0] == "days" ? .days : .weeks
+        interval = n
+        weekdays = [Calendar.current.component(.weekday, from: due)]
+        time = Self.quarterHour(due)
+        start = due
+    }
+
+    /// 7:42 becomes 7:45, so a repeat starts from a round time.
+    static func quarterHour(_ date: Date) -> Date {
+        let calendar = Calendar.current
+        let parts = calendar.dateComponents([.hour, .minute], from: date)
+        let total = (parts.hour ?? 0) * 60 + Int((Double(parts.minute ?? 0) / 15).rounded()) * 15
+        // Only the time of day is used, so 11:53 PM rounding to midnight can stay on the same date.
+        return calendar.date(bySettingHour: total / 60 % 24, minute: total % 60, second: 0, of: date) ?? date
     }
 
     private var newTaskHint: String {
         if repeats {
             guard let firstDue else { return "Pick at least one day." }
-            return "First due \(Fmt.dateTime.string(from: firstDue)). The next copy appears once each deadline has passed, even if you finished early, and each copy needs its own proof. Like any task, a copy locks in 24 hours before it's due."
+            return "\(series.schedule()). First one: \(Fmt.dateTime.string(from: firstDue)). The next copy appears once each deadline has passed, even if you finished early, and each copy needs its own proof. Like any task, a copy locks in 24 hours before it's due."
         }
         let left = due.timeIntervalSince(model.now)
         if left <= LockPolicy.freezeWindow {
@@ -161,7 +216,8 @@ struct TaskEditorView: View {
                 return
             }
         } else if repeats {
-            model.addRecurring(title: title, details: details, weekdays: weekdays, minuteOfDay: minuteOfDay)
+            model.addRecurring(title: title, details: details, unit: unit, interval: interval, weekdays: weekdays,
+                               minuteOfDay: minuteOfDay, startDate: start)
         } else {
             model.addTask(title: title, details: details, due: due)
         }
@@ -169,20 +225,24 @@ struct TaskEditorView: View {
     }
 }
 
-/// One button per day, in the order this Mac's week starts. Any number can be on.
+/// One button per day (S M T W T F S, like Calendar's custom repeat), in the order this Mac's week starts.
+/// Any number can be on; hovering shows the full name.
 struct WeekdayPicker: View {
     @Binding var selection: Set<Int>
 
     var body: some View {
         let calendar = Calendar.current
-        HStack(spacing: 4) {
+        HStack(spacing: 3) {
             ForEach(0..<7, id: \.self) { i in
                 let day = (calendar.firstWeekday - 1 + i) % 7 + 1
-                Toggle(calendar.shortWeekdaySymbols[day - 1], isOn: Binding(
+                Toggle(isOn: Binding(
                     get: { selection.contains(day) },
-                    set: { on in if on { selection.insert(day) } else { selection.remove(day) } }))
-                    .toggleStyle(.button)
-                    .help(calendar.weekdaySymbols[day - 1])
+                    set: { on in if on { selection.insert(day) } else { selection.remove(day) } })) {
+                    Text(calendar.veryShortWeekdaySymbols[day - 1]).frame(width: 14)
+                }
+                .toggleStyle(.button)
+                .help(calendar.weekdaySymbols[day - 1])
+                .accessibilityLabel(calendar.weekdaySymbols[day - 1])
             }
         }
     }

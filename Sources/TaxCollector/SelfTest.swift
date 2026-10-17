@@ -482,6 +482,30 @@ enum SelfTest {
         model.settings.overrideUntil = nil
         model.tick()
 
+        // Every 4 days, from a start date
+        model.settings.overrideUntil = Date().addingTimeInterval(600)
+        let startDay = calendar.date(byAdding: .day, value: 1, to: model.now)!
+        model.addRecurring(title: "Repeat: every 4 days", details: "", unit: .days, interval: 4, weekdays: [],
+                           minuteOfDay: 8 * 60, startDate: startDay)
+        let fourID = model.recurring.first { $0.title == "Repeat: every 4 days" }?.id
+        func fours() -> [TaxTask] { model.tasks.filter { $0.seriesID != nil && $0.seriesID == fourID } }
+        let fourFirst = calendar.date(bySettingHour: 8, minute: 0, second: 0, of: startDay)!
+        check("repeat: every 4 days starts on its start date", fours().map(\.dueDate) == [fourFirst],
+              "\(fours().map(\.dueDate))")
+        if let first = fours().first, let i = model.tasks.firstIndex(where: { $0.id == first.id }) {
+            model.tasks[i].status = .proven(at: model.now)
+            model.settings.lastSeen = fourFirst.addingTimeInterval(60)
+            model.tick()
+            check("repeat: and the next copy is 4 days later",
+                  fours().filter(\.isPending).first?.dueDate == calendar.date(byAdding: .day, value: 4, to: fourFirst),
+                  "\(fours().map(\.dueDate))")
+        }
+        if let id = fourID { model.stopRepeating(id) }
+        for t in fours() { _ = model.delete(t.id, guardianApproved: true) }
+        model.resetClockGuard()
+        model.settings.overrideUntil = nil
+        model.tick()
+
         // Everything ends up on disk
         let saved = model.store.loadTasks()
         check("storage: tasks on disk match the app", Set(saved.map(\.id)) == Set(model.tasks.map(\.id)))
