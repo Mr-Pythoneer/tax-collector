@@ -1,0 +1,27 @@
+<Project>
+
+  <!--
+    Shared build settings for the Windows port of Tax Collector.
+
+    Build output goes to one artifacts tree (UseArtifactsOutput) instead of a
+    bin/obj under every project, so nothing large lands on the Mac's main drive.
+    TC_ARTIFACTS points it at the external SSD (see windows/env.sh). When the
+    variable isn't set, it falls back to a repo-local artifacts/ folder, which
+    .gitignore keeps out of the public repo.
+  -->
+  <PropertyGroup>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath Condition="'$(TC_ARTIFACTS)' != ''">$(TC_ARTIFACTS)</ArtifactsPath>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <Deterministic>true</Deterministic>
+    <!-- Lets the WinForms app compile on the Mac (no Windows SDK present). -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+</Project>

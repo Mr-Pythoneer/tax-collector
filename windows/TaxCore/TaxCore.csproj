@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    TaxCore: the rules engine, shared by the Windows tray app and by
+    TaxCore.Check (which runs on the Mac). Plain cross-platform .NET 10, no
+    Windows or UI dependencies, so it builds and its tests run anywhere.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>TaxCore</RootNamespace>
+    <AssemblyName>TaxCore</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>
