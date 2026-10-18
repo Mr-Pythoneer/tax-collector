@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    TaxCollector: the Windows tray app. WinForms on .NET 10. Built on the Mac
+    with EnableWindowsTargeting (inherited from Directory.Build.props); runs on
+    Windows only. Publish self-contained for win-arm64 and win-x64.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>TaxCollector</RootNamespace>
+    <AssemblyName>TaxCollector</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RuntimeIdentifiers>win-arm64;win-x64</RuntimeIdentifiers>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <IsPackable>false</IsPackable>
+    <!-- Defender can flag a compressed single file; keep it uncompressed. -->
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
+    <!-- SelfContained is set at publish time (-p:SelfContained=true) so a plain
+         framework-dependent build still type-checks on the Mac. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../TaxCore/TaxCore.csproj" />
+  </ItemGroup>
+
+</Project>
