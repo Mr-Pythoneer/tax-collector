@@ -48,6 +48,17 @@ public enum ParentAction: Equatable, Sendable {
     }
 }
 
+/// Why the gate turned a command away. `command` is set when the signature was good, so the answer can name it.
+public struct GateRejection: Error, Equatable, Sendable {
+    public var reason: CommandRejection
+    public var command: ParentCommand?
+
+    public init(_ reason: CommandRejection, _ command: ParentCommand? = nil) {
+        self.reason = reason
+        self.command = command
+    }
+}
+
 public enum CommandRejection: String, Error, Sendable {
     case badBox = "bad_box"
     case badSignature = "bad_signature"
@@ -66,22 +77,22 @@ public enum CommandGate {
     /// Nothing is applied here.
     public static func admit(box: Data, linkKey: SymmetricKey, signKey: Data, channel: String, device: String,
                              receivedAt: Int64, lastCounter: Int64,
-                             calendar: Calendar = .current) -> Result<ParentCommand, CommandRejection> {
+                             calendar: Calendar = .current) -> Result<ParentCommand, GateRejection> {
         guard let opened = try? LinkCrypto.open(box, key: linkKey, aad: LinkCrypto.commandAAD(channel: channel, device: device)),
-              opened.count > 64 else { return .failure(.badBox) }
+              opened.count > 64 else { return .failure(.init(.badBox)) }
         let signature = Data(opened.prefix(64)), body = Data(opened.dropFirst(64))
-        guard LinkCrypto.isValidSignature(signature, of: body, by: signKey) else { return .failure(.badSignature) }
+        guard LinkCrypto.isValidSignature(signature, of: body, by: signKey) else { return .failure(.init(.badSignature)) }
         guard let fields = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
               int(fields["v"]) == 1, let ch = fields["ch"] as? String, let dev = fields["dev"] as? String,
               let n = int(fields["n"]), let at = int(fields["at"]), let id = fields["id"] as? String,
-              let type = fields["type"] as? String else { return .failure(.badArgs) }
-        guard ch == channel, dev == device else { return .failure(.wrongTarget) }
-        guard n > lastCounter else { return .failure(.replayed) }
-        guard abs(receivedAt - at) <= freshness else { return .failure(.stale) }
+              let type = fields["type"] as? String else { return .failure(.init(.badArgs)) }
         var command = ParentCommand(channel: ch, device: dev, counter: n, issuedAt: at, id: id, type: type, action: nil)
+        guard ch == channel, dev == device else { return .failure(.init(.wrongTarget, command)) }
+        guard n > lastCounter else { return .failure(.init(.replayed, command)) }
+        guard abs(receivedAt - at) <= freshness else { return .failure(.init(.stale, command)) }
         guard known.contains(type) else { return .success(command) }
         guard let action = parse(type: type, args: fields["args"] as? [String: Any] ?? [:], calendar: calendar) else {
-            return .failure(.badArgs)
+            return .failure(.init(.badArgs, command))
         }
         command.action = action
         return .success(command)

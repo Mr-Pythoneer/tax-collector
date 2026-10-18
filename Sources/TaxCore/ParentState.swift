@@ -202,8 +202,11 @@ public struct CommandResult: Codable, Equatable, Sendable {
     public var outcome: String
     public var reason: String
     public var at: Int64
+    /// For "replayed": the last counter the computer accepted from that phone, so it can catch up.
+    public var last: Int64?
 
-    public init(dev: String, n: Int64, id: String, type: String, outcome: String, reason: String = "", at: Int64) {
+    public init(dev: String, n: Int64, id: String, type: String, outcome: String, reason: String = "", at: Int64,
+                last: Int64? = nil) {
         self.dev = dev
         self.n = n
         self.id = id
@@ -211,6 +214,7 @@ public struct CommandResult: Codable, Equatable, Sendable {
         self.outcome = outcome
         self.reason = WireState.clean(reason, max: 200)
         self.at = at
+        self.last = last
     }
 }
 

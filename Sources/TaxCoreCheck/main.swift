@@ -1189,7 +1189,7 @@ struct CommandRules {
     func body(_ type: String, _ args: String, n: Int64? = nil, at a: Int64? = nil, ch: String? = nil) -> String {
         #"{"v":1,"ch":"\#(ch ?? channel)","dev":"\#(device)","n":\#(n ?? at),"at":\#(a ?? at),"id":"c1","type":"\#(type)","args":\#(args)}"#
     }
-    func admit(_ b: Data, last: Int64 = 0, received: Int64? = nil) -> Result<ParentCommand, CommandRejection> {
+    func admit(_ b: Data, last: Int64 = 0, received: Int64? = nil) -> Result<ParentCommand, GateRejection> {
         CommandGate.admit(box: b, linkKey: key, signKey: signer.publicKey.x963Representation, channel: channel,
                           device: device, receivedAt: received ?? at, lastCounter: last)
     }
@@ -1211,10 +1211,12 @@ struct CommandRules {
     }
 
     func badCommandsAreRejected() {
-        func reason(_ r: Result<ParentCommand, CommandRejection>) -> CommandRejection? {
-            if case let .failure(e) = r { return e }
+        func reason(_ r: Result<ParentCommand, GateRejection>) -> CommandRejection? {
+            if case let .failure(e) = r { return e.reason }
             return nil
         }
+        // After a good signature, the rejection names the command, so the phone can match it up.
+        if case let .failure(e) = admit(box(body("normal", "{}")), last: at) { expect(e.command?.id == "c1" && e.command?.counter == at) } else { expect(false) }
         let ok = body("normal", "{}")
         expect(reason(admit(box(ok), last: at)) == .replayed)
         expect(reason(admit(box(ok), received: at + 11 * 60 * 1000)) == .stale)

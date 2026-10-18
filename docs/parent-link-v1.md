@@ -225,7 +225,7 @@ The state carries the last 50 results:
 **`outcome`** is one of:
 - `applied`;
 - `noop` (already so, or the item is gone);
-- `rejected` (with a reason: `replayed`, `stale`, `bad_signature`, `wrong_target`, `unknown_device`, `bad_args`, `not_found`);
+- `rejected` (with a reason: `replayed`, `stale`, `bad_signature`, `wrong_target`, `unknown_device`, `bad_args`, `not_found`). When the signature was good, the result still carries the command's `id`, `n` and `type`. For `replayed` it also has `"last"`, the last counter accepted from that phone, so the phone can catch up;
 - `unsupported` (unknown `type`, or not in this computer's capabilities).
 
 A box that won't open, or a bad signature, is acknowledged and logged as a tamper warning. No command is applied from it.

@@ -232,7 +232,13 @@ final class ParentLinkClient {
                 }
                 if upTo > 0 {
                     _ = try await call("POST", "/v1/ch/\(link.channel)/cmd/ack", json: ["upTo": upTo], token: link.computerToken)
-                    uploadSoon = true
+                    // Answer right away, so a parent sees "Applied" in a second, not at the next check.
+                    if await upload() {
+                        lastUpload = model?.now ?? Date()
+                        uploadSoon = false
+                    } else {
+                        uploadSoon = true
+                    }
                 }
             } catch is CancellationError {
                 return
@@ -259,12 +265,16 @@ final class ParentLinkClient {
         }
         switch CommandGate.admit(box: box, linkKey: key, signKey: signKey, channel: link.channel, device: dev,
                                  receivedAt: receivedAt, lastCounter: link.lastCounter[dev] ?? 0) {
-        case let .failure(why):
+        case let .failure(rejection):
+            let why = rejection.reason
             if why == .badBox || why == .badSignature {
                 link.notes["badCommand"] = String(nowMs)
                 store.log("PARENT a command for \(device.name) failed its check (\(why.rawValue))")
             }
-            link.record(CommandResult(dev: dev, n: 0, id: "", type: "", outcome: "rejected", reason: why.rawValue, at: nowMs))
+            let c = rejection.command
+            link.record(CommandResult(dev: dev, n: c?.counter ?? 0, id: c?.id ?? "", type: c?.type ?? "", outcome: "rejected",
+                                      reason: why.rawValue, at: nowMs,
+                                      last: why == .replayed ? link.lastCounter[dev] : nil))
         case let .success(command):
             link.lastCounter[dev] = command.counter
             var outcome = ("unsupported", "")
