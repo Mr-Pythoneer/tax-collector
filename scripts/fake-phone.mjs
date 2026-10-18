@@ -196,8 +196,12 @@ for (let i = 0; i < 10 && replayed.length < 2; i++) {
 }
 check("replay: the same command twice is rejected the second time", replayed.length === 2 && replayed[1].outcome === "rejected" && replayed[1].reason === "replayed" && replayed[1].last >= replayed[1].n, JSON.stringify(replayed));
 const forged = await command("free", { until: Date.now() + 86400_000 }, { tamper: true });
-for (let i = 0; i < 10; i++) { await state(lastSeq); }
-const { s: after } = await state(0);
+let after;
+for (let i = 0; i < 20; i++) {
+  ({ s: after } = await state(0));
+  if (after?.results?.some((x) => x.reason === "bad_signature")) break;
+  await sleep(500);
+}
 check("forgery: a bad signature changes nothing", after?.access?.mode !== "free" && after?.results?.some((x) => x.reason === "bad_signature"));
 check("forgery: it's flagged to parents", after?.flags?.some((f) => f.kind === "badCommand"));
 
