@@ -154,6 +154,12 @@ public struct WireState: Codable, Equatable, Sendable {
         public var id: String
         public var name: String
         public var pairedAt: Int64
+
+        public init(id: String, name: String, pairedAt: Int64) {
+            self.id = id
+            self.name = name
+            self.pairedAt = pairedAt
+        }
     }
 
     public struct Flag: Codable, Equatable, Sendable {
@@ -175,7 +181,7 @@ public struct WireState: Codable, Equatable, Sendable {
     }
 
     public static let capabilities = ["lock", "tasks", "repeats", "apps", "block", "penalty", "extensions", "message",
-                                      "approveProof"]
+                                      "approveProof", "guardianSetup"]
 
     /// No line breaks (they could fake a log line on the other end), and no more than `max` characters.
     public static func clean(_ text: String, max: Int) -> String {

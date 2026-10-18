@@ -1,6 +1,7 @@
 import AppKit
 
-/// While active, closes every Dock app that isn't allowed.
+/// While active, closes every Dock app that `shouldClose` picks: during a lock, everything not allowed; at any
+/// time, apps a parent blocked.
 @MainActor
 final class Enforcer {
     /// Graceful quit first; force-quit if the app is still around after this long.
@@ -8,7 +9,7 @@ final class Enforcer {
 
     private(set) var isActive = false
     let dryRun: Bool
-    var isAllowed: (String?) -> Bool = { _ in true }
+    var shouldClose: (String?) -> Bool = { _ in false }
     /// Testing aid: when set, only these apps are ever closed, so a real lock can be tested
     /// without closing anything else you have open.
     var onlyTargets: Set<String>?
@@ -58,7 +59,7 @@ final class Enforcer {
         askedToQuit = askedToQuit.filter { live.contains($0.key) }
 
         for app in running where app.activationPolicy == .regular && !app.isTerminated && app.processIdentifier != me {
-            if isAllowed(app.bundleIdentifier) { continue }
+            if !shouldClose(app.bundleIdentifier) { continue }
             if let onlyTargets, !onlyTargets.contains(app.bundleIdentifier ?? "") { continue }
             collect(app)
         }

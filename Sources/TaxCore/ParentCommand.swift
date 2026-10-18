@@ -34,6 +34,7 @@ public enum ParentAction: Equatable, Sendable {
     case setExtensions(Bool)
     case message(String)
     case removeDevice(String)
+    case allowGuardianSetup(until: Date)
 
     /// The setting a command writes, for "the latest issued wins". nil for one-off actions.
     public var setting: String? {
@@ -89,7 +90,7 @@ public enum CommandGate {
     public static let known: Set<String> = [
         "lock", "free", "normal", "addTask", "editTask", "deleteTask", "excuseTask", "approveProof",
         "addRepeat", "stopRepeat", "allowApp", "disallowApp", "blockApp", "unblockApp",
-        "setPenalty", "setExtensions", "message", "removeDevice",
+        "setPenalty", "setExtensions", "message", "removeDevice", "allowGuardianSetup",
     ]
 
     /// The arguments of a known type, checked. nil if they're wrong.
@@ -160,6 +161,9 @@ public enum CommandGate {
         case "message":
             guard let t = text(args["text"], max: 300), !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
             return .message(t)
+        case "allowGuardianSetup":
+            guard let ms = int(args["until"]) else { return nil }
+            return .allowGuardianSetup(until: date(ms))
         case "removeDevice":
             guard let id = args["id"] as? String, !id.isEmpty else { return nil }
             return .removeDevice(id)

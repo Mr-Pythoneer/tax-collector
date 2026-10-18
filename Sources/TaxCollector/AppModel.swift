@@ -69,6 +69,14 @@ final class AppModel {
     @ObservationIgnored var onImported: ([TaxTask]) -> Void = { _ in }
     /// A repeating task's new copy just appeared.
     @ObservationIgnored var onRecurred: (TaxTask) -> Void = { _ in }
+    /// A setting parents can also change was changed here, so a phone's older change mustn't win over it.
+    @ObservationIgnored var onLocalSetting: (String) -> Void = { _ in }
+    /// Something a parent's phone did, worth a notification on this computer.
+    @ObservationIgnored var onParentAction: (String) -> Void = { _ in }
+    /// While a phone is linked, setting a new guardian code needs a parent's go-ahead until this time.
+    var guardianSetupAllowedUntil: Date?
+    /// Apps seen running lately, for parents to pick from when blocking: bundle ID → (name, last seen).
+    @ObservationIgnored var recentApps: [String: (name: String, seen: Date)] = [:]
     /// Opens the Blackbaud sign-in window.
     @ObservationIgnored var onBlackbaudSignIn: () -> Void = {}
     /// Moves the app into Applications if needed, then sets it to run in the background.
@@ -135,9 +143,11 @@ final class AppModel {
             store.log("FEED merged \(merged.removed.count) duplicate imported task(s)")
         }
 
-        enforcer.isAllowed = { [weak self] id in
-            guard let self else { return true }
-            return Allowlist.isAllowed(bundleID: id, extra: self.settings.extraAllowedBundleIDs, selfID: self.selfBundleID)
+        enforcer.shouldClose = { [weak self] id in
+            guard let self else { return false }
+            return Allowlist.shouldClose(bundleID: id, locked: self.lock.isLocked, strength: self.lock.strength,
+                                         extra: self.settings.extraAllowedBundleIDs,
+                                         blocked: self.settings.blockedApps.map(\.id), selfID: self.selfBundleID)
         }
         enforcer.log = { [weak self] in self?.store.log($0) }
         enforcer.onClosed = { [weak self] name in
@@ -174,11 +184,18 @@ final class AppModel {
         }
 
         bringBackRepeats()
-        lock = LockPolicy.state(tasks: tasks, overrideUntil: settings.overrideUntil, now: now)
+        // A parent's lock that has run out is gone, not just inactive.
+        if let parentLock = settings.parentLock, !parentLock.isActive(at: now) {
+            settings.parentLock = nil
+            store.saveSettings(settings)
+            store.log("PARENT lock by \(parentLock.by) ended")
+        }
+        lock = LockPolicy.state(tasks: tasks, overrideUntil: settings.overrideUntil, parentLock: settings.parentLock, now: now)
         if lock.isLocked != wasLocked {
             wasLocked = lock.isLocked
             lockChanged()
         }
+        updateEnforcer()
         checkWarnings()
         pollFeedIfDue()
     }
@@ -186,14 +203,24 @@ final class AppModel {
     private func lockChanged() {
         if lock.isLocked {
             closedApps.removeAll()
-            let due = (lock.overdue + lock.penalties).map(\.title).joined(separator: ", ")
-            store.log("LOCK ON — overdue: \(due)")
-            enforcer.activate()
+            if let parentLock = lock.parentLock {
+                store.log("LOCK ON — locked by \(parentLock.by)")
+            } else {
+                let due = (lock.overdue + lock.penalties).map(\.title).joined(separator: ", ")
+                store.log("LOCK ON — overdue: \(due)")
+            }
         } else {
-            store.log(lock.overrideUntil != nil ? "LOCK OFF — guardian unlock" : "LOCK OFF — proof accepted")
-            enforcer.deactivate()
+            store.log(lock.overrideUntil != nil ? "LOCK OFF — unlocked" : "LOCK OFF — nothing owed")
         }
+        updateEnforcer()
         onLockChange(lock.isLocked)
+    }
+
+    /// The enforcer runs during a lock, and whenever a parent has blocked an app.
+    func updateEnforcer() {
+        let needed = lock.isLocked || !settings.blockedApps.isEmpty
+        if needed && !enforcer.isActive { enforcer.activate() }
+        if !needed && enforcer.isActive { enforcer.deactivate() }
     }
 
     private func checkWarnings() {
@@ -385,7 +412,7 @@ final class AppModel {
         }
     }
 
-    private func record(verdict: Verdict, reason: String, checklist: [String] = [], taskID: UUID, submissionID: UUID) {
+    func record(verdict: Verdict, reason: String, checklist: [String] = [], taskID: UUID, submissionID: UUID) {
         guard let ti = tasks.firstIndex(where: { $0.id == taskID }),
               let si = tasks[ti].proofs.firstIndex(where: { $0.id == submissionID }) else { return }
         tasks[ti].proofs[si].verdict = verdict
@@ -751,6 +778,7 @@ final class AppModel {
         guardian = record
         store.saveGuardian(record)
         store.log("GUARDIAN code set")
+        onLocalSetting("guardian")
     }
 
     func checkGuardian(_ code: String) -> GuardianCheck {
@@ -772,17 +800,11 @@ final class AppModel {
     }
 
     func unlock(hours: Double) {
-        settings.overrideUntil = now.addingTimeInterval(hours * 3600)
-        store.saveSettings(settings)
-        store.log("GUARDIAN unlocked for \(hours)h")
-        tick()
+        unlock(until: now.addingTimeInterval(hours * 3600), by: Self.guardianName)
     }
 
     func endUnlock() {
-        settings.overrideUntil = nil
-        store.saveSettings(settings)
-        store.log("GUARDIAN ended the unlock")
-        tick()
+        backToNormal(by: Self.guardianName)
     }
 
     func excuse(_ id: UUID) {
@@ -851,5 +873,5 @@ final class AppModel {
 
     // MARK: Helpers
 
-    private func save() { store.saveTasks(tasks) }
+    func save() { store.saveTasks(tasks) }
 }

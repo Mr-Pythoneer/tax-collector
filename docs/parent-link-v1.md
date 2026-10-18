@@ -319,6 +319,7 @@ Every command has the common fields of §5.1. Under **Setting**, "—" means it'
 | `setExtensions` | `{"enabled":bool}` | Turns asking Claude for more time on or off. | extensions |
 | `message` | `{"text":≤300 characters}` | Shows a notification and keeps the message on the main window and lock screen for 24 hours. | — |
 | `removeDevice` | `{"id"}` | Unpairs that phone (it may be the sender). Its key and state copy are dropped, and its token is deregistered. | — |
+| `allowGuardianSetup` | `{"until":ms}` | Lets the computer set a new guardian code until `until` (at most 15 minutes ahead). For when the code was lost or its file deleted: while a phone is linked, the computer otherwise shows "Ask a parent" instead of first-time setup. | — |
 
 **App IDs:** bundle IDs on Mac, `windows:<identity>` strings on Windows. The parent app picks them from the state's `apps.running` and `apps.recent`.
 
@@ -338,7 +339,7 @@ UTF-8 JSON, before compression. Text fields are cut to the lengths shown. A fiel
   "computer": {
     "name": "…", "platform": "mac", "app": "0.7.0", "os": "macOS 26.1",
     "timeZone": "America/Toronto",
-    "capabilities": ["lock","tasks","repeats","apps","block","penalty","extensions","message","approveProof"]
+    "capabilities": ["lock","tasks","repeats","apps","block","penalty","extensions","message","approveProof","guardianSetup"]
   },
   "access": {"mode": "normal" | "locked" | "free", "until": null, "strength": null, "by": "…", "at": 0},
   "lock": {"locked": false, "reasons": [{"kind": "overdue" | "penalty" | "parent", "taskId": "…", "title": "…", "until": 0}]},

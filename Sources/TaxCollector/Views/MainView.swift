@@ -43,7 +43,9 @@ struct MainView: View {
     var body: some View {
         @Bindable var router = router
         Group {
-            if model.guardian == nil {
+            if model.needsParentForGuardianSetup {
+                AskParentView()
+            } else if model.guardian == nil {
                 OnboardingView()
             } else {
                 TaskListView(openLockWindow: openLockWindow)
@@ -193,7 +195,17 @@ struct TaskListView: View {
             out.append(Notice(id: "setup-error", symbol: "xmark.octagon.fill", color: .red,
                               title: "Setup didn't finish", detail: error, button: "Try Again", action: finish))
         }
-        if model.lock.isLocked {
+        if let message = model.settings.parentMessage, model.now.timeIntervalSince(message.at) < ParentMessage.showFor {
+            out.append(Notice(id: "message", symbol: "text.bubble.fill", color: .blue, title: "From \(message.by)",
+                              detail: message.text, button: nil, action: {}))
+        }
+        if let parentLock = model.lock.parentLock, model.lock.isLocked {
+            out.append(Notice(id: "lock", symbol: "lock.fill", color: .red,
+                              title: "Locked by \(parentLock.by)" + (parentLock.until.map { " until \(Fmt.time.string(from: $0))" } ?? ""),
+                              detail: parentLock.strength == .all ? "Every app closes except Finder and Tax Collector."
+                                  : "Apps other than the allowed ones keep closing.",
+                              button: "Show", action: openLockWindow))
+        } else if model.lock.isLocked {
             out.append(Notice(id: "lock", symbol: "lock.fill", color: .red, title: "Your Mac is locked",
                               detail: model.lock.overdue.isEmpty
                                   ? "Late penalty. It unlocks by itself when the time is up."
@@ -201,7 +213,7 @@ struct TaskListView: View {
                               button: "Show", action: openLockWindow))
         } else if let until = model.lock.overrideUntil {
             out.append(Notice(id: "override", symbol: "key.fill", color: .orange,
-                              title: "Unlocked by your guardian until \(Fmt.time.string(from: until))",
+                              title: "Unlocked until \(Fmt.time.string(from: until))",
                               detail: "Anything still overdue then locks the Mac again.", button: nil, action: {}))
         }
         if model.auditorStatus != "Ready" && model.auditorStatus != "Checking…" {
@@ -560,5 +572,22 @@ struct LogView: View {
         }
         .padding(20)
         .frame(width: 640, height: 440)
+    }
+}
+
+/// The guardian code is missing while a parent's phone is linked: only a parent can let a new one be set.
+struct AskParentView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Image(systemName: "person.badge.key.fill").font(.system(size: 34)).foregroundStyle(.secondary)
+            Text("Ask a parent").font(.title.bold())
+            Text("The guardian code is missing. Because a parent's phone is linked to this Mac, a parent has to allow a new one: in their phone app, they open this computer and tap Allow a New Guardian Code. Then this window lets you set one for the next few minutes.")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Your parents' phones have been told the code went missing.")
+                .font(.callout).foregroundStyle(.secondary)
+        }
+        .padding(32)
+        .frame(maxWidth: 520, maxHeight: .infinity, alignment: .topLeading)
     }
 }
