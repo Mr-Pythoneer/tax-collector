@@ -3,6 +3,7 @@
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
 using TaxCore;
 using TaskStatus = TaxCore.TaskStatus;
 
@@ -543,6 +544,135 @@ static class Checks
             r.Expect(days.SelectMany(d => d.Tasks).Select(t => t.Title).SequenceEqual(new[] { "soon today", "later today", "next week" }));
             r.Expect(days.Count >= 2);
             r.Expect(!s.SelectMany(x => x.Tasks).Any(t => t.Title == "paid"));
+        });
+
+        // MARK: Parent-link vectors (spec/vectors/v1.json)
+        var vpath = FindVectors();
+        if (vpath == null)
+        {
+            C("vectors: spec/vectors/v1.json found", () => r.Expect(false));
+            return;
+        }
+        JsonElement vectors;
+        try { vectors = JsonDocument.Parse(File.ReadAllText(vpath)).RootElement.Clone(); }
+        catch (Exception ex) { C("vectors: parse", () => { Console.WriteLine(ex.Message); r.Expect(false); }); return; }
+        RegisterVectorChecks(r, vectors);
+    }
+
+    static string? FindVectors()
+    {
+        var rel = Path.Combine("spec", "vectors", "v1.json");
+        foreach (var start in new[] { Environment.CurrentDirectory, AppContext.BaseDirectory })
+        {
+            var dir = new DirectoryInfo(start);
+            while (dir != null)
+            {
+                var candidate = Path.Combine(dir.FullName, rel);
+                if (File.Exists(candidate)) return candidate;
+                dir = dir.Parent;
+            }
+        }
+        return null;
+    }
+
+    static void RegisterVectorChecks(Runner r, JsonElement v)
+    {
+        string S(JsonElement e, params string[] path) { foreach (var p in path) e = e.GetProperty(p); return e.GetString()!; }
+        byte[] B(JsonElement e, params string[] path) => LinkCrypto.FromBase64Url(S(e, path));
+        byte[] U(string s) => Encoding.UTF8.GetBytes(s);
+        string B64(byte[] b) => LinkCrypto.Base64Url(b);
+
+        var pairing = v.GetProperty("pairing");
+        var phone = pairing.GetProperty("phone");
+        var computer = pairing.GetProperty("computer");
+        var link = v.GetProperty("link");
+        var command = v.GetProperty("command");
+        var state = v.GetProperty("state");
+
+        r.Add("vectors.normalise", () =>
+        {
+            foreach (var pair in v.GetProperty("normalise").EnumerateArray())
+                r.Expect(LinkCrypto.NormaliseCode(pair[0].GetString()!) == pair[1].GetString());
+        });
+
+        r.Add("vectors.slotAndPairKey", () =>
+        {
+            var (slot, key) = LinkCrypto.Pairing(S(pairing, "code"));
+            r.Expect(slot == S(pairing, "slot"));
+            r.Expect(B64(key) == S(pairing, "pairKey"));
+            r.Expect(Encoding.ASCII.GetString(LinkCrypto.PairAad(slot)) == S(pairing, "aad"));
+        });
+
+        r.Add("vectors.helloBox", () =>
+        {
+            var (_, key) = LinkCrypto.Pairing(S(pairing, "code"));
+            var aad = LinkCrypto.PairAad(S(pairing, "slot"));
+            var sealed1 = LinkCrypto.Seal(U(S(pairing, "hello", "plaintext")), key, aad, B(pairing, "hello", "nonce"));
+            r.Expect(B64(sealed1) == S(pairing, "hello", "box"));
+            var opened = LinkCrypto.Open(B(pairing, "hello", "box"), key, aad);
+            r.Expect(Encoding.UTF8.GetString(opened) == S(pairing, "hello", "plaintext"));
+            var threw = false;
+            try { LinkCrypto.Open(B(pairing, "hello", "box"), key, LinkCrypto.PairAad(S(pairing, "slot") + "x")); }
+            catch (LinkCrypto.LinkException) { threw = true; }
+            r.Expect(threw);
+        });
+
+        r.Add("vectors.commitAndSas", () =>
+        {
+            var commit = LinkCrypto.Commitment(B(phone, "signKey", "public"), B(phone, "dhKey", "public"),
+                B(phone, "nonce"), B(phone, "tokenHash"), S(phone, "name"));
+            r.Expect(B64(commit) == S(pairing, "commit"));
+            r.Expect(B64(LinkCrypto.Sha256(B(phone, "token"))) == S(phone, "tokenHash"));
+            var sas = LinkCrypto.ComparisonCode(B(computer, "nonce"), B(phone, "nonce"),
+                B(computer, "dhKey", "public"), B(phone, "signKey", "public"), B(phone, "dhKey", "public"));
+            r.Expect(sas == S(pairing, "sas"));
+        });
+
+        r.Add("vectors.linkKey", () =>
+        {
+            using var comp = LinkCrypto.ImportEcdhPrivate(B(computer, "dhKey", "d"), B(computer, "dhKey", "x"), B(computer, "dhKey", "y"));
+            using var ph = LinkCrypto.ImportEcdhPrivate(B(phone, "dhKey", "d"), B(phone, "dhKey", "x"), B(phone, "dhKey", "y"));
+            var sharedA = LinkCrypto.SharedSecret(comp, B(phone, "dhKey", "public"));
+            var sharedB = LinkCrypto.SharedSecret(ph, B(computer, "dhKey", "public"));
+            r.Expect(B64(sharedA) == S(link, "shared"));
+            r.Expect(B64(sharedB) == S(link, "shared"));
+            var key = LinkCrypto.LinkKey(comp, B(phone, "dhKey", "public"), S(link, "channel"), S(link, "deviceId"));
+            r.Expect(B64(key) == S(link, "linkKey"));
+        });
+
+        r.Add("vectors.command", () =>
+        {
+            var linkKey = B(link, "linkKey");
+            var aad = LinkCrypto.CommandAad(S(link, "channel"), S(link, "deviceId"));
+            r.Expect(Encoding.ASCII.GetString(aad) == S(command, "aad"));
+            var opened = LinkCrypto.Open(B(command, "box"), linkKey, aad);
+            r.Expect(B64(opened[..64]) == S(command, "signature"));
+            var body = opened[64..];
+            r.Expect(Encoding.UTF8.GetString(body) == S(command, "body"));
+            // The box is deterministic given the nonce.
+            var sealedCmd = LinkCrypto.Seal(opened, linkKey, aad, B(command, "nonce"));
+            r.Expect(B64(sealedCmd) == S(command, "box"));
+            // Only the true signature verifies.
+            r.Expect(LinkCrypto.IsValidSignature(B(command, "signature"), body, B(phone, "signKey", "public")));
+            r.Expect(!LinkCrypto.IsValidSignature(B(command, "tamperedSignature"), body, B(phone, "signKey", "public")));
+            var altered = U(S(command, "body").Replace("homework", "all"));
+            r.Expect(!LinkCrypto.IsValidSignature(B(command, "signature"), altered, B(phone, "signKey", "public")));
+        });
+
+        r.Add("vectors.state", () =>
+        {
+            var linkKey = B(link, "linkKey");
+            var aad = LinkCrypto.StateAad(S(link, "channel"), S(link, "deviceId"));
+            var opened = LinkCrypto.Open(B(state, "box"), linkKey, aad);
+            r.Expect(B64(opened) == S(state, "deflated"));
+            r.Expect(Encoding.UTF8.GetString(LinkCrypto.InflateRaw(opened)) == S(state, "json"));
+            var threw = false;
+            try { LinkCrypto.Open(B(state, "box"), linkKey, LinkCrypto.StateAad("other", S(link, "deviceId"))); }
+            catch (LinkCrypto.LinkException) { threw = true; }
+            r.Expect(threw);
+            // Our own deflate need not match byte-for-byte, but must round-trip.
+            var json = U(S(state, "json"));
+            r.Expect(LinkCrypto.InflateRaw(LinkCrypto.DeflateRaw(json)).SequenceEqual(json));
         });
     }
 }
