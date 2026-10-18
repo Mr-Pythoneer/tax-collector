@@ -158,6 +158,60 @@ public struct TaxTask: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
+/// How much a parent lock closes. `homework` keeps the allowed apps open, like a lock for overdue work;
+/// `all` closes everything except the system and Tax Collector.
+public enum LockStrength: String, Codable, Equatable, Sendable {
+    case homework
+    case all
+}
+
+/// A lock a parent put on, whatever is due.
+public struct ParentLock: Codable, Equatable, Sendable {
+    /// nil until a parent lifts it.
+    public var until: Date?
+    public var strength: LockStrength
+    /// Who: a phone's name, or "your guardian" for the guardian code on this computer.
+    public var by: String
+    public var since: Date
+    public var note: String?
+
+    public init(until: Date?, strength: LockStrength, by: String, since: Date, note: String? = nil) {
+        self.until = until
+        self.strength = strength
+        self.by = by
+        self.since = since
+        self.note = note
+    }
+
+    public func isActive(at now: Date) -> Bool { until.map { $0 > now } ?? true }
+}
+
+/// An app, by bundle ID, with the name to show for it.
+public struct AppRef: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
+/// A note a parent sent from their phone. Shown for a day.
+public struct ParentMessage: Codable, Equatable, Sendable {
+    public var text: String
+    public var by: String
+    public var at: Date
+
+    public init(text: String, by: String, at: Date) {
+        self.text = text
+        self.by = by
+        self.at = at
+    }
+
+    public static let showFor: TimeInterval = 24 * 3600
+}
+
 public struct Settings: Codable, Equatable, Sendable {
     public var penaltyMinutes: Int
     /// Apps the guardian added on top of the built-in allowlist.
@@ -182,6 +236,15 @@ public struct Settings: Codable, Equatable, Sendable {
     public var justSetUp: Bool
     /// Whether you can ask Claude for up to 12 more hours. Only the guardian can change it.
     public var extensionsEnabled: Bool
+    /// A lock a parent put on from their phone (or the guardian here).
+    public var parentLock: ParentLock?
+    /// Apps closed whenever they run, locked or not.
+    public var blockedApps: [AppRef]
+    /// Names for the extra allowed apps, when a parent's phone added them.
+    public var appNames: [String: String]
+    /// A parent's phone is paired. While it is, a missing guardian code doesn't reopen first-time setup.
+    public var parentLinked: Bool
+    public var parentMessage: ParentMessage?
 
     public init() {
         penaltyMinutes = 30
@@ -198,6 +261,11 @@ public struct Settings: Codable, Equatable, Sendable {
         appearance = "light"
         justSetUp = false
         extensionsEnabled = true
+        parentLock = nil
+        blockedApps = []
+        appNames = [:]
+        parentLinked = false
+        parentMessage = nil
     }
 
     // Decode field by field so adding a setting later doesn't wipe saved ones.
@@ -218,5 +286,10 @@ public struct Settings: Codable, Equatable, Sendable {
         appearance = try c.decodeIfPresent(String.self, forKey: .appearance) ?? appearance
         justSetUp = try c.decodeIfPresent(Bool.self, forKey: .justSetUp) ?? false
         extensionsEnabled = try c.decodeIfPresent(Bool.self, forKey: .extensionsEnabled) ?? true
+        parentLock = try c.decodeIfPresent(ParentLock.self, forKey: .parentLock)
+        blockedApps = try c.decodeIfPresent([AppRef].self, forKey: .blockedApps) ?? []
+        appNames = try c.decodeIfPresent([String: String].self, forKey: .appNames) ?? [:]
+        parentLinked = try c.decodeIfPresent(Bool.self, forKey: .parentLinked) ?? false
+        parentMessage = try c.decodeIfPresent(ParentMessage.self, forKey: .parentMessage)
     }
 }

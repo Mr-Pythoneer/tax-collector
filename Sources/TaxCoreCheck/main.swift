@@ -1,5 +1,6 @@
 // Runs the TaxCore checks. Swift Testing can't discover tests under Command Line Tools
 // alone, so this is a plain executable: `swift run taxcore-check`.
+import CryptoKit
 import Foundation
 import TaxCore
 
@@ -1040,6 +1041,219 @@ struct RepeatRules {
     }
 }
 
+/// spec/vectors/v1.json: the bytes every implementation of the parent link has to agree on.
+struct LinkVectors {
+    let v: [String: Any] = {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("spec/vectors/v1.json")
+        return (try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: Any] ?? [:]
+    }()
+    func d(_ path: String) -> Data {
+        var node: Any? = v
+        for key in path.split(separator: ".") { node = (node as? [String: Any])?[String(key)] }
+        return LinkCrypto.fromBase64url(node as? String ?? "") ?? Data()
+    }
+    func s(_ path: String) -> String {
+        var node: Any? = v
+        for key in path.split(separator: ".") { node = (node as? [String: Any])?[String(key)] }
+        return node as? String ?? ""
+    }
+
+    func codesNormaliseAndDerive() {
+        expect(!v.isEmpty)
+        for pair in v["normalise"] as? [[String]] ?? [] { expect(LinkCrypto.normaliseCode(pair[0]) == pair[1]) }
+        let (slot, key) = LinkCrypto.pairing(code: s("pairing.code"))
+        expect(slot == s("pairing.slot"))
+        expect(key.withUnsafeBytes { Data($0) } == d("pairing.pairKey"))
+        expect(LinkCrypto.displayCode("7kq2m9xwhr") == "7KQ2M-9XWHR")
+        expect(LinkCrypto.normaliseCode(LinkCrypto.newPairingCode()).count == 10)
+    }
+
+    func helloBoxIsExact() {
+        let (slot, key) = LinkCrypto.pairing(code: s("pairing.code"))
+        let aad = LinkCrypto.pairAAD(slot: slot)
+        let sealed = try? LinkCrypto.seal(Data(s("pairing.hello.plaintext").utf8), key: key, aad: aad, nonce: d("pairing.hello.nonce"))
+        expect(sealed == d("pairing.hello.box"))
+        expect((try? LinkCrypto.open(d("pairing.hello.box"), key: key, aad: aad)) == Data(s("pairing.hello.plaintext").utf8))
+        expect((try? LinkCrypto.open(d("pairing.hello.box"), key: key, aad: aad + Data("x".utf8))) == nil)
+    }
+
+    func commitAndComparisonCode() {
+        expect(LinkCrypto.sha256(d("pairing.phone.token")) == d("pairing.phone.tokenHash"))
+        let commit = LinkCrypto.commitment(signKey: d("pairing.phone.signKey.public"), dhKey: d("pairing.phone.dhKey.public"),
+                                           nonce: d("pairing.phone.nonce"), tokenHash: d("pairing.phone.tokenHash"),
+                                           name: s("pairing.phone.name"))
+        expect(LinkCrypto.base64url(commit) == s("pairing.commit"))
+        let code = LinkCrypto.comparisonCode(computerNonce: d("pairing.computer.nonce"), phoneNonce: d("pairing.phone.nonce"),
+                                             computerDhKey: d("pairing.computer.dhKey.public"),
+                                             phoneSignKey: d("pairing.phone.signKey.public"), phoneDhKey: d("pairing.phone.dhKey.public"))
+        expect(code == s("pairing.sas"))
+    }
+
+    func linkKeyMatches() {
+        guard let computer = try? P256.KeyAgreement.PrivateKey(rawRepresentation: d("pairing.computer.dhKey.d")) else {
+            expect(false); return
+        }
+        expect(computer.publicKey.x963Representation == d("pairing.computer.dhKey.public"))
+        let phone = try? P256.KeyAgreement.PublicKey(x963Representation: d("pairing.phone.dhKey.public"))
+        let shared = phone.flatMap { try? computer.sharedSecretFromKeyAgreement(with: $0) }
+        expect(shared?.withUnsafeBytes { Data($0) } == d("link.shared"))
+        let key = try? LinkCrypto.linkKey(computer: computer, phoneDhKey: d("pairing.phone.dhKey.public"),
+                                          channel: s("link.channel"), deviceID: s("link.deviceId"))
+        expect(key?.withUnsafeBytes { Data($0) } == d("link.linkKey"))
+    }
+
+    func commandOpensAndVerifies() {
+        let key = SymmetricKey(data: d("link.linkKey"))
+        let aad = LinkCrypto.commandAAD(channel: s("link.channel"), device: s("link.deviceId"))
+        guard let opened = try? LinkCrypto.open(d("command.box"), key: key, aad: aad) else { expect(false); return }
+        let sig = opened.prefix(64), body = opened.dropFirst(64)
+        expect(sig == d("command.signature") && body == Data(s("command.body").utf8))
+        let pub = d("pairing.phone.signKey.public")
+        expect(LinkCrypto.isValidSignature(Data(sig), of: Data(body), by: pub))
+        expect(!LinkCrypto.isValidSignature(d("command.tamperedSignature"), of: Data(body), by: pub))
+        expect(!LinkCrypto.isValidSignature(Data(sig), of: Data(s("command.body").replacingOccurrences(of: "homework", with: "all").utf8), by: pub))
+        expect((try? LinkCrypto.open(d("command.box"), key: key, aad: LinkCrypto.commandAAD(channel: "other", device: s("link.deviceId")))) == nil)
+    }
+
+    func stateOpensAndInflates() {
+        let key = SymmetricKey(data: d("link.linkKey"))
+        let aad = LinkCrypto.stateAAD(channel: s("link.channel"), device: s("link.deviceId"))
+        let opened = try? LinkCrypto.open(d("state.box"), key: key, aad: aad)
+        expect(opened == d("state.deflated"))
+        expect(opened.flatMap(LinkCrypto.inflateRaw) == Data(s("state.json").utf8))
+        // Our own compression round-trips too (its bytes may differ from Node's, which is fine).
+        let mine = LinkCrypto.deflateRaw(Data(s("state.json").utf8))
+        expect(mine.flatMap(LinkCrypto.inflateRaw) == Data(s("state.json").utf8))
+    }
+}
+
+struct ParentRules {
+    func parentLockAndUnlock() {
+        let lock = ParentLock(until: t0.addingTimeInterval(3600), strength: .all, by: "Mom's iPhone", since: t0)
+        var state = LockPolicy.state(tasks: [], overrideUntil: nil, parentLock: lock, now: t0)
+        expect(state.isLocked && state.strength == .all && state.parentLock == lock)
+        // An unlock beats it, and it ends on its own.
+        state = LockPolicy.state(tasks: [], overrideUntil: t0.addingTimeInterval(60), parentLock: lock, now: t0)
+        expect(!state.isLocked)
+        expect(!LockPolicy.state(tasks: [], overrideUntil: nil, parentLock: lock, now: t0.addingTimeInterval(3601)).isLocked)
+        // Until lifted.
+        let open = ParentLock(until: nil, strength: .homework, by: "x", since: t0)
+        expect(LockPolicy.state(tasks: [], overrideUntil: nil, parentLock: open, now: t0.addingTimeInterval(1e7)).isLocked)
+        // Overdue work alone still uses the homework rules.
+        expect(LockPolicy.state(tasks: [task(due: -60)], overrideUntil: nil, now: t0).strength == .homework)
+    }
+
+    func whatGetsClosed() {
+        func close(_ id: String?, locked: Bool, _ strength: LockStrength = .homework, blocked: [String] = [], extra: [String] = []) -> Bool {
+            Allowlist.shouldClose(bundleID: id, locked: locked, strength: strength, extra: extra, blocked: blocked, selfID: "me.self")
+        }
+        expect(!close("com.apple.finder", locked: true, .all, blocked: ["com.apple.finder"]))
+        expect(!close("me.self", locked: true, .all, blocked: ["me.self"]))
+        expect(close("org.game", locked: false, blocked: ["org.game"]))
+        expect(close("org.game.helper", locked: false, blocked: ["org.game"]))
+        expect(!close("org.game", locked: false))
+        expect(!close("com.apple.mail", locked: true))
+        expect(close("com.apple.mail", locked: true, .all))
+        expect(close("com.apple.mail", locked: false, blocked: ["com.apple.mail"]))
+        expect(!close("org.extra", locked: true, extra: ["org.extra"]))
+        expect(close("org.other", locked: true))
+        expect(close(nil, locked: true))
+        expect(!close(nil, locked: false))
+    }
+
+    func oldSettingsStillLoad() {
+        let json = #"{"penaltyMinutes":15,"extraAllowedBundleIDs":["org.x"]}"#
+        let settings = try? JSONDecoder().decode(Settings.self, from: Data(json.utf8))
+        expect(settings?.penaltyMinutes == 15 && settings?.blockedApps == [] && settings?.parentLock == nil && settings?.parentLinked == false)
+        var withLock = Settings()
+        withLock.parentLock = ParentLock(until: nil, strength: .all, by: "x", since: t0)
+        withLock.blockedApps = [AppRef(id: "org.game", name: "Game")]
+        let round = (try? JSONEncoder().encode(withLock)).flatMap { try? JSONDecoder().decode(Settings.self, from: $0) }
+        expect(round == withLock)
+    }
+}
+
+struct CommandRules {
+    let channel = "EBESExQVFhcYGRobHB0eHw", device = "6f1c0e3a-2b4d-4c8e-9a1f-0d2e3c4b5a69"
+    let signer = P256.Signing.PrivateKey()
+    let key = SymmetricKey(size: .bits256)
+    let at: Int64 = 1_800_000_000_000
+
+    func box(_ body: String, sign: P256.Signing.PrivateKey? = nil, flip: Bool = false, channel ch: String? = nil) -> Data {
+        var sig = (try? (sign ?? signer).signature(for: Data(body.utf8)).rawRepresentation) ?? Data()
+        if flip { sig[5] ^= 1 }
+        return (try? LinkCrypto.seal(sig + Data(body.utf8), key: key,
+                                     aad: LinkCrypto.commandAAD(channel: ch ?? channel, device: device))) ?? Data()
+    }
+    func body(_ type: String, _ args: String, n: Int64? = nil, at a: Int64? = nil, ch: String? = nil) -> String {
+        #"{"v":1,"ch":"\#(ch ?? channel)","dev":"\#(device)","n":\#(n ?? at),"at":\#(a ?? at),"id":"c1","type":"\#(type)","args":\#(args)}"#
+    }
+    func admit(_ b: Data, last: Int64 = 0, received: Int64? = nil) -> Result<ParentCommand, CommandRejection> {
+        CommandGate.admit(box: b, linkKey: key, signKey: signer.publicKey.x963Representation, channel: channel,
+                          device: device, receivedAt: received ?? at, lastCounter: last)
+    }
+
+    func goodCommandsPass() {
+        let lock = admit(box(body("lock", #"{"until":null,"strength":"all"}"#)))
+        expect((try? lock.get().action) == .lock(until: nil, strength: .all, note: nil))
+        let free = admit(box(body("free", #"{"until":1800000360000}"#)))
+        expect((try? free.get().action) == .free(until: Date(timeIntervalSince1970: 1_800_000_360)))
+        let approve = admit(box(body("approveProof", #"{"taskId":"0b8f2c64-7d1e-4f3a-9c5b-2e6d8a4f1b37","proofId":"1b8f2c64-7d1e-4f3a-9c5b-2e6d8a4f1b37"}"#)))
+        if case .approveProof? = try? approve.get().action {} else { expect(false) }
+        let block = admit(box(body("blockApp", #"{"app":{"id":"org.game","name":"Game"}}"#)))
+        expect((try? block.get().action)??.setting == "app:org.game")
+        let rep = admit(box(body("addRepeat", #"{"repeat":{"id":"0b8f2c64-7d1e-4f3a-9c5b-2e6d8a4f1b37","title":"Math","details":"","unit":"days","interval":4,"weekdays":[],"minuteOfDay":510,"startDate":"2026-10-19"}}"#)))
+        if case let .addRepeat(r)?? = try? rep.get().action { expect(r.unit == .days && r.interval == 4 && r.minuteOfDay == 510) } else { expect(false) }
+        // Unknown types get through the gate with no action: answered "unsupported".
+        let unknown = admit(box(body("makeCoffee", "{}")))
+        expect((try? unknown.get())?.action == nil && (try? unknown.get())?.type == "makeCoffee")
+    }
+
+    func badCommandsAreRejected() {
+        func reason(_ r: Result<ParentCommand, CommandRejection>) -> CommandRejection? {
+            if case let .failure(e) = r { return e }
+            return nil
+        }
+        let ok = body("normal", "{}")
+        expect(reason(admit(box(ok), last: at)) == .replayed)
+        expect(reason(admit(box(ok), received: at + 11 * 60 * 1000)) == .stale)
+        expect(reason(admit(box(ok), received: at - 11 * 60 * 1000)) == .stale)
+        expect(reason(admit(box(ok, flip: true))) == .badSignature)
+        expect(reason(admit(box(ok, sign: P256.Signing.PrivateKey()))) == .badSignature)
+        expect(reason(admit(box(ok, channel: "other"))) == .badBox)
+        expect(reason(admit(Data([1, 2, 3]))) == .badBox)
+        expect(reason(admit(box(body("normal", "{}", ch: "someOtherChannelId00")))) == .wrongTarget)
+        expect(reason(admit(box(body("setPenalty", #"{"minutes":5000}"#)))) == .badArgs)
+        expect(reason(admit(box(body("lock", #"{"until":null}"#)))) == .badArgs)
+        expect(reason(admit(box(body("setExtensions", #"{"enabled":1}"#)))) == .badArgs)
+        expect(reason(admit(box(body("addTask", #"{"task":{"id":"nope","title":"x","due":1}}"#)))) == .badArgs)
+    }
+
+    func stateHasNoSecretsOrLineBreaks() {
+        var settings = Settings()
+        settings.blackbaudURL = "webcal://school.example/podium/feed/iCal.aspx?z=SECRETTOKEN"
+        settings.parentMessage = ParentMessage(text: "Dinner at 6", by: "Mom's iPhone", at: t0)
+        var t = TaxTask(title: "Math: Worksheet\nGUARDIAN unlocked", details: "line one\nline two", dueDate: t0.addingTimeInterval(3600),
+                        createdAt: t0, source: .blackbaud(uid: "uid-1"))
+        t.proofs = [ProofSubmission(submittedAt: t0, note: "did it\r\nall", attachments: ["a.png"], verdict: .rejected, reason: "Blank")]
+        let input = StateBuilder.Input(
+            seq: 7, now: t0, computer: .init(name: "Test Mac", app: "0.7.0", os: "macOS", timeZone: "UTC"),
+            tasks: [t], recurring: [], settings: settings, lock: LockState(), checking: [], builtIn: [], running: [],
+            recent: [], activity: [WireState.Event(at: 1, kind: "task", text: "a\nb")], results: [], devices: [], flags: [],
+            accessBy: "", accessAt: 0)
+        let state = StateBuilder.build(input)
+        let json = String(data: (try? JSONEncoder().encode(state)) ?? Data(), encoding: .utf8) ?? ""
+        expect(!json.contains("SECRETTOKEN") && !json.contains("podium"))
+        expect(!state.tasks[0].title.contains("\n") && !state.tasks[0].details.contains("\n") && !state.tasks[0].proofs[0].note.contains("\n"))
+        expect(state.tasks[0].course == "Math" && state.tasks[0].status == "pending" && state.tasks[0].proofs[0].verdict == "rejected")
+        expect(state.message?.text == "Dinner at 6" && state.seq == 7 && state.access.mode == "normal")
+        expect(state.activity[0].text == "a b")
+        let packed = StateBuilder.encode(state)
+        expect(packed.flatMap(LinkCrypto.inflateRaw).flatMap { try? JSONDecoder().decode(WireState.self, from: $0) } == state)
+    }
+}
+
 struct AssignmentPage {
     let host = "school.myschoolapp.com"
     var sample: [String: Any] {
@@ -1092,6 +1306,18 @@ let checks: [(String, () -> Void)] = [
     ("RepeatRules.everyFewWeeks", { RepeatRules().everyFewWeeks() }),
     ("RepeatRules.customScheduleReads", { RepeatRules().customScheduleReads() }),
     ("RepeatRules.weeklyRepeatsFromBeforeStillLoad", { RepeatRules().weeklyRepeatsFromBeforeStillLoad() }),
+    ("LinkVectors.codesNormaliseAndDerive", { LinkVectors().codesNormaliseAndDerive() }),
+    ("LinkVectors.helloBoxIsExact", { LinkVectors().helloBoxIsExact() }),
+    ("LinkVectors.commitAndComparisonCode", { LinkVectors().commitAndComparisonCode() }),
+    ("LinkVectors.linkKeyMatches", { LinkVectors().linkKeyMatches() }),
+    ("LinkVectors.commandOpensAndVerifies", { LinkVectors().commandOpensAndVerifies() }),
+    ("LinkVectors.stateOpensAndInflates", { LinkVectors().stateOpensAndInflates() }),
+    ("ParentRules.parentLockAndUnlock", { ParentRules().parentLockAndUnlock() }),
+    ("ParentRules.whatGetsClosed", { ParentRules().whatGetsClosed() }),
+    ("ParentRules.oldSettingsStillLoad", { ParentRules().oldSettingsStillLoad() }),
+    ("CommandRules.goodCommandsPass", { CommandRules().goodCommandsPass() }),
+    ("CommandRules.badCommandsAreRejected", { CommandRules().badCommandsAreRejected() }),
+    ("CommandRules.stateHasNoSecretsOrLineBreaks", { CommandRules().stateHasNoSecretsOrLineBreaks() }),
     ("AssignmentPage.parsesEverything", { AssignmentPage().parsesEverything() }),
     ("AssignmentPage.urlsAndSites", { AssignmentPage().urlsAndSites() }),
     ("MoreTime.trackRecordCounts", { MoreTime().trackRecordCounts() }),

@@ -328,7 +328,7 @@ Every command has the common fields of §5.1. Under **Setting**, "—" means it'
 
 ## 8. State document
 
-UTF-8 JSON, before compression. Text fields are cut to the lengths shown.
+UTF-8 JSON, before compression. Text fields are cut to the lengths shown. A field whose value is `null` may also be left out, so read a missing field as `null`.
 
 ```json
 {

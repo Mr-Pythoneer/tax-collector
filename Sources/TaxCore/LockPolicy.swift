@@ -5,15 +5,21 @@ public struct LockState: Equatable, Sendable {
     /// Tasks paid late whose penalty is still running.
     public var penalties: [TaxTask]
     public var overrideUntil: Date?
+    /// A parent's lock that's still on.
+    public var parentLock: ParentLock?
 
-    public init(overdue: [TaxTask] = [], penalties: [TaxTask] = [], overrideUntil: Date? = nil) {
+    public init(overdue: [TaxTask] = [], penalties: [TaxTask] = [], overrideUntil: Date? = nil, parentLock: ParentLock? = nil) {
         self.overdue = overdue
         self.penalties = penalties
         self.overrideUntil = overrideUntil
+        self.parentLock = parentLock
     }
 
     public var owesSomething: Bool { !overdue.isEmpty || !penalties.isEmpty }
-    public var isLocked: Bool { owesSomething && overrideUntil == nil }
+    /// An unlock (the guardian's, or a parent's "free until") beats everything, including a parent lock.
+    public var isLocked: Bool { (owesSomething || parentLock != nil) && overrideUntil == nil }
+    /// A parent's "everything" lock closes the allowed apps too.
+    public var strength: LockStrength { parentLock?.strength ?? .homework }
 
     /// When the lock ends by itself (only possible when nothing is overdue, just penalties).
     public var penaltyEndsAt: Date? {
@@ -34,11 +40,12 @@ public enum LockPolicy {
     /// passed. Claude gets 3 minutes; if its answer still hasn't come, the task counts as overdue anyway.
     public static let checkGrace: TimeInterval = 5 * 60
 
-    public static func state(tasks: [TaxTask], overrideUntil: Date?, now: Date) -> LockState {
+    public static func state(tasks: [TaxTask], overrideUntil: Date?, parentLock: ParentLock? = nil, now: Date) -> LockState {
         let overdue = tasks.filter { isOverdue($0, now: now) }
         let penalties = tasks.filter { isInPenalty($0, now: now) }
         let override = overrideUntil.flatMap { $0 > now ? $0 : nil }
-        return LockState(overdue: overdue, penalties: penalties, overrideUntil: override)
+        return LockState(overdue: overdue, penalties: penalties, overrideUntil: override,
+                         parentLock: parentLock.flatMap { $0.isActive(at: now) ? $0 : nil })
     }
 
     public static func isOverdue(_ task: TaxTask, now: Date) -> Bool {

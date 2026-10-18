@@ -21,6 +21,7 @@ public final class Store {
     private var guardianURL: URL { dir.appendingPathComponent("guardian.json") }
     private var blackbaudURL: URL { dir.appendingPathComponent("blackbaud.json") }
     private var recurringURL: URL { dir.appendingPathComponent("recurring.json") }
+    public var linkURL: URL { dir.appendingPathComponent("parent-link.json") }
     public var logURL: URL { dir.appendingPathComponent("events.log") }
     public var proofsRoot: URL { dir.appendingPathComponent("proofs", isDirectory: true) }
 
@@ -38,6 +39,17 @@ public final class Store {
 
     public func loadRecurring() -> [RecurringTask] { load([RecurringTask].self, from: recurringURL) ?? [] }
     public func saveRecurring(_ series: [RecurringTask]) { save(series, to: recurringURL) }
+
+    public func loadLink() -> LinkFile? { load(LinkFile.self, from: linkURL) }
+    /// Readable only by this account. That keeps out other accounts, not the student (docs/parent-link-v1.md §9).
+    public func saveLink(_ link: LinkFile?) {
+        guard let link else {
+            try? FileManager.default.removeItem(at: linkURL)
+            return
+        }
+        save(link, to: linkURL)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: linkURL.path)
+    }
 
     public func proofFolder(task: UUID, submission: UUID) -> URL {
         let url = proofsRoot
