@@ -674,5 +674,37 @@ static class Checks
             var json = U(S(state, "json"));
             r.Expect(LinkCrypto.InflateRaw(LinkCrypto.DeflateRaw(json)).SequenceEqual(json));
         });
+
+        r.Add("vectors.commandGate", () =>
+        {
+            var linkKey = B(link, "linkKey");
+            var channel = S(link, "channel");
+            var device = S(link, "deviceId");
+            var signKey = B(phone, "signKey", "public");
+            // Read the issued time from the body so the command is fresh.
+            using var bodyDoc = JsonDocument.Parse(S(command, "body"));
+            var at = bodyDoc.RootElement.GetProperty("at").GetInt64();
+            var n = bodyDoc.RootElement.GetProperty("n").GetInt64();
+
+            var ok = CommandGate.Admit(B(command, "box"), linkKey, signKey, channel, device, at, n - 1);
+            r.Expect(ok.Ok && ok.Command != null);
+            r.Expect(ok.Command!.Type == "lock" && ok.Command.Counter == n && ok.Command.IssuedAt == at);
+            r.Expect(ok.Command.Action is ParentAction.Lock { Strength: LockStrength.Homework } lk
+                     && lk.Until == DateTimeOffset.FromUnixTimeMilliseconds(1729210000000));
+
+            // Replay: n <= lastCounter.
+            r.Expect(CommandGate.Admit(B(command, "box"), linkKey, signKey, channel, device, at, n).Rejection?.Reason
+                     == CommandRejection.Replayed);
+            // Stale: receivedAt far from issuedAt.
+            r.Expect(CommandGate.Admit(B(command, "box"), linkKey, signKey, channel, device, at + CommandGate.Freshness + 1, n - 1)
+                     .Rejection?.Reason == CommandRejection.Stale);
+            // Wrong channel.
+            r.Expect(CommandGate.Admit(B(command, "box"), linkKey, signKey, "other", device, at, n - 1).Rejection?.Reason
+                     is CommandRejection.BadBox or CommandRejection.WrongTarget);
+            // Tampered box (flip a ciphertext byte) → bad_box.
+            var bad = B(command, "box"); bad[20] ^= 0xFF;
+            r.Expect(CommandGate.Admit(bad, linkKey, signKey, channel, device, at, n - 1).Rejection?.Reason
+                     == CommandRejection.BadBox);
+        });
     }
 }
