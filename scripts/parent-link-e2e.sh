@@ -3,12 +3,12 @@
 # folder, dry run, no windows), and a fake parent phone that pairs and sends every command.
 # Nothing touches the real install. Everything started here is stopped when it ends.
 #   scripts/parent-link-e2e.sh                  # uses scripts/mini-relay.mjs
-#   RELAY="node server/relay.mjs" scripts/parent-link-e2e.sh   # or another relay that takes [port] [setupCode]
+#   RELAY="node server/server.mjs" scripts/parent-link-e2e.sh   # the real relay (takes [port] [setupCode])
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
 PORT="${PORT:-8799}"
-SETUP="E2ESETUPCODE01"
+SETUP="E2ESETPC0DE1"   # 12 characters of Crockford base32, like a real setup code (spec §6.2)
 APP="build.noindex/Tax Collector.app/Contents/MacOS/TaxCollector"
 DATA="$(mktemp -d)"
 RELAY="${RELAY:-node scripts/mini-relay.mjs}"
