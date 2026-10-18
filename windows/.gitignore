@@ -1,0 +1,6 @@
+# Build output. UseArtifactsOutput normally sends this to the SSD (TC_ARTIFACTS);
+# these keep any local fallback out of the repo.
+artifacts/
+bin/
+obj/
+*.user
