@@ -67,6 +67,11 @@ test("status in plain words: “Locked since 7:02 PM: Math worksheet overdue”"
   const penalty = f.statusSummary(state({ lock: { locked: true, reasons: [{ kind: "penalty", taskId: "a", title: "Essay", until: at(2026, 10, 19, 20, 30) }] } }), NOW);
   assert.equal(penalty.headline, "Locked until 8:30 PM: late penalty for Essay");
 
+  const guardian = f.statusSummary(state({ access: { mode: "locked", until: null, strength: "all", by: "your guardian", at: 0 }, lock: { locked: true, reasons: [{ kind: "parent", title: "your guardian" }] } }), NOW);
+  assert.equal(guardian.headline, "Locked by a parent at the computer until someone unlocks it", "the Mac's words for the student, reworded");
+  const byGuardian = f.statusSummary(state({ access: { mode: "free", until: at(2026, 10, 19, 22), by: "your guardian", at: 0 } }), NOW);
+  assert.match(byGuardian.detail, /^By a parent at the computer\./);
+
   const free = f.statusSummary(state({ access: { mode: "free", until: at(2026, 10, 19, 22), by: "Mom's iPhone", at: 0 } }), NOW);
   assert.equal(free.tone, "free");
   assert.equal(free.headline, "Unlocked until 10:00 PM");

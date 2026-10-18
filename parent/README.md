@@ -14,6 +14,8 @@ Then, on the computer, open Tax Collector's **Guardian Settings → Parents' pho
 
 The server's address must never change after phones are paired: each phone's keys and data belong to that exact address.
 
+It needs iOS 16.4 or newer on iPhone (for `CompressionStream`), or a current Chrome, Edge, Firefox or Safari elsewhere, and an HTTPS address (or `localhost` for trying it out): browsers only offer WebCrypto, service workers and persistent storage on secure pages.
+
 ## What's on each screen
 
 | Screen | What it does |

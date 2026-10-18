@@ -69,11 +69,8 @@ if (-not (Test-Path $EnvFile)) {
     ) | Set-Content -Path $EnvFile -Encoding ASCII
 }
 
-# --- Stop the old copy, then make or show the setup code while nothing else uses the data folder
+# --- Stop the old copy; the task below starts the new one
 if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName $TaskName }
-Write-Host 'Setup code (type it into Tax Collector on each computer):'
-& $Node "--env-file=$EnvFile" $Server --setup-code
-if ($LASTEXITCODE) { throw 'The relay could not read or create its data folder.' }
 
 # --- The task. It runs node.exe itself, with no wrapper, so stopping the task stops the relay.
 # Paths are quoted because "Program Files" has a space; the working folder must not be quoted.
@@ -92,7 +89,8 @@ Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Triggers -S
     -Description 'Tax Collector relay server (server\README.md).' -Force | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 
-# --- Check that it answers
+# --- Check that it answers, then show the setup code it made on its first start (reading it
+# changes nothing, so it's fine while the relay runs)
 $Port = 8787
 $Line = Select-String -Path $EnvFile -Pattern '^\s*PORT\s*=\s*(\d+)' | Select-Object -Last 1
 if ($Line) { $Port = $Line.Matches[0].Groups[1].Value }
@@ -101,6 +99,8 @@ foreach ($Attempt in 1..10) {
     try {
         if ((Invoke-RestMethod -UseBasicParsing -TimeoutSec 3 "http://127.0.0.1:$Port/v1/health").ok) {
             Write-Host "The relay is running on http://127.0.0.1:$Port. Next: HTTPS with Tailscale Funnel (server\README.md)."
+            Write-Host 'Setup code (type it into Tax Collector on each computer):'
+            & $Node "--env-file=$EnvFile" $Server --setup-code
             return
         }
     } catch { }

@@ -224,6 +224,9 @@ export function taskSections(tasks, now, tz) {
 
 const strengthWords = (s) => (s === "all" ? "everything closed" : "homework apps allowed");
 
+/** Who changed access, for a parent: the Mac words guardian actions for the student ("your guardian"). */
+export const byWords = (by) => (!by ? "a parent" : /^your guardian$/i.test(by) ? "a parent at the computer" : by);
+
 /**
  * The plain-words status: { tone: "locked" | "free" | "ok", headline, detail }.
  * "Locked since 7:02 PM: Math worksheet overdue".
@@ -239,7 +242,7 @@ export function statusSummary(state, now) {
   const byId = new Map(tasks.map((t) => [t.id, t]));
 
   if (a.mode === "locked" || parent) {
-    const by = a.by || parent?.title || "a parent";
+    const by = byWords(a.by || parent?.title);
     const until = a.until ?? parent?.until ?? null;
     const since = a.at ? `since ${when(a.at, now, tz)} ` : "";
     return {
@@ -261,7 +264,8 @@ export function statusSummary(state, now) {
   }
   if (state.lock?.locked) return { tone: "locked", headline: "Locked", detail: "" };
   if (a.mode === "free" && a.until) {
-    return { tone: "free", headline: `Unlocked until ${when(a.until, now, tz)}`, detail: `${a.by ? "By " + a.by + ". " : ""}Overdue work won't lock the computer until then.` };
+    const by = a.by ? byWords(a.by) : "";
+    return { tone: "free", headline: `Unlocked until ${when(a.until, now, tz)}`, detail: `${by ? "By " + by + ". " : ""}Overdue work won't lock the computer until then.` };
   }
   const next = tasks.filter((t) => t.status === "pending" && t.due > now).sort((x, y) => x.due - y.due)[0];
   return { tone: "ok", headline: "Not locked", detail: next ? `Next: ${next.title}, due ${when(next.due, now, tz)}.` : "Nothing is due." };

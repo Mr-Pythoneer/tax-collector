@@ -329,3 +329,45 @@ test("an unreadable channel file is moved aside and doesn't stop the relay start
   }
   assert.deepEqual(alive.sort(), [204, 404], "one channel lost, the other fine");
 });
+
+test("a temporary file left by a crash mid-write is cleared at startup; the real files are untouched", async (t) => {
+  const r = await startRelay();
+  t.after(() => rm(r.dataDir, { recursive: true, force: true }));
+  const s = await setupChannel(r, { devices: 1 });
+  await r.stop();
+  const channels = join(r.dataDir, "channels");
+  const [meta] = (await readdir(channels)).filter((n) => /^[0-9a-f]{32}\.json$/.test(n));
+  await writeFile(join(channels, meta + ".tmp-1234-7"), "{half a fi");
+  await writeFile(join(r.dataDir, "server.json.tmp-99-1"), "");
+  const again = await startRelay({ dataDir: r.dataDir });
+  assert.ok(!(await readdir(channels)).some((n) => n.includes(".tmp-")));
+  assert.ok(!(await readdir(r.dataDir)).some((n) => n.includes(".tmp-")));
+  const res = await call(again.base, "GET", `/v1/ch/${s.ch}/state`, { token: s.phones[0].token });
+  assert.equal(res.status, 204, "the channel and its phone are still there");
+  await again.stop();
+});
+
+test("bad settings stop the server with one line saying what's wrong", async () => {
+  const server = fileURLToPath(new URL("../server.mjs", import.meta.url));
+  const { NODE_TEST_CONTEXT, ...inherited } = process.env;
+  const top = await mkdtemp(join(tmpdir(), "tc-relay-test-"));
+  try {
+    for (const [env, words] of [
+      [{ PORT: "eighty" }, /PORT must be a number/],
+      [{ PORT: "70000" }, /PORT must be a number/],
+      [{ TC_SETUP_CODE: "short" }, /TC_SETUP_CODE must have 12/],
+      [{ TC_TRUST_PROXY: "everyone" }, /TC_TRUST_PROXY: "everyone"/],
+    ]) {
+      const result = await promisify(execFile)(process.execPath, [server], { env: { ...inherited, TC_DATA_DIR: join(top, "data"), ...env }, timeout: 10_000 }).then(
+        () => ({ code: 0, stderr: "" }),
+        (e) => ({ code: e.code, stderr: e.stderr }),
+      );
+      assert.equal(result.code, 2, JSON.stringify(env));
+      assert.match(result.stderr, words);
+      assert.equal(result.stderr.trim().split("\n").length, 1, "one line, no stack trace");
+    }
+    assert.deepEqual(await readdir(top), [], "and no data folder was made");
+  } finally {
+    await rm(top, { recursive: true, force: true });
+  }
+});

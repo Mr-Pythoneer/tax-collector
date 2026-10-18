@@ -19,7 +19,7 @@ export function renderMessage({ app, view }) {
     const m = typeof view.state.message === "string" ? { text: view.state.message } : view.state.message;
     const now = nowOf(view);
     currentBox.replaceChildren(m?.text ? group({ header: "Showing on the computer now" },
-      row({ title: m.text, subtitle: [m.by && "From " + m.by, m.at && f.when(m.at, now, tz)].filter(Boolean).join(", ") })) : "");
+      row({ title: m.text, subtitle: [m.by && "From " + f.byWords(m.by), m.at && f.when(m.at, now, tz)].filter(Boolean).join(", ") })) : "");
     const rows = commandRows(view, { types: ["message"], limit: 3 });
     sentBox.replaceChildren(rows.length ? group({ header: "Sent from this phone" }, rows) : "");
   };

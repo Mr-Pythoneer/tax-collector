@@ -53,7 +53,7 @@ export function render({ app, view }) {
     flags.length > 0 && group({ header: "Warnings", headerTone: "warn", footer: "These come from the computer. A warning that keeps coming back can mean someone is working around Tax Collector." },
       flags.map((fl) => row({ title: f.flagTitle(fl.kind), subtitle: fl.text, value: fl.at ? f.when(fl.at, now, tz) : "", dot: "dot-orange", className: "flag-row" }))),
     message?.text && group({ header: "Your message on the computer" },
-      row({ title: message.text, subtitle: message.by ? `From ${message.by}${message.at ? ", " + f.when(message.at, now, tz) : ""}. Shows for 24 hours.` : "" })),
+      row({ title: message.text, subtitle: message.by ? `From ${f.byWords(message.by)}${message.at ? ", " + f.when(message.at, now, tz) : ""}. Shows for 24 hours.` : "" })),
     !cutOff && group({}, menu),
     view.commands.length > 0 && group({ header: "Sent from this phone" }, commandRows(view, { limit: 4 })),
     group({},
