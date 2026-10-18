@@ -1,0 +1,29 @@
+# What `docker build -f server/Dockerfile .` may see. BuildKit reads this file because it sits next
+# to the Dockerfile and is named after it. Paths are relative to the repository root.
+
+# Leave out everything...
+*
+
+# ...then let back in only what the Dockerfile copies.
+!server/package.json
+!server/server.mjs
+!server/lib
+!parent
+
+# Never, even if a line above changes: data, tests, tools, the apps' sources and build output.
+server/data
+server/test
+server/tools
+parent/test
+parent/tests
+parent/tools
+parent/README.md
+.git
+.claude
+.build
+build
+build.noindex
+Sources
+windows
+**/node_modules
+**/.DS_Store

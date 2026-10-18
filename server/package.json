@@ -1,0 +1,13 @@
+{
+  "name": "tax-collector-relay",
+  "description": "Relay server for Tax Collector's parent link: passes encrypted messages between the computer and parents' phones, and serves the parent app.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/"
+  }
+}

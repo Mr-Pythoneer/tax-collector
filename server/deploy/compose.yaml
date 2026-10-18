@@ -1,0 +1,47 @@
+# Tax Collector relay with Docker Compose. From the repository root:
+#
+#   docker compose -f server/deploy/compose.yaml up -d --build
+#
+# The setup code is printed on first start:  docker logs tax-collector-relay
+# To see it again:  docker exec tax-collector-relay node server/server.mjs --setup-code
+# HTTPS, updating and the rest: server/README.md.
+
+name: tax-collector-relay
+
+services:
+  relay:
+    build:
+      context: ../..
+      dockerfile: server/Dockerfile
+    image: tax-collector-relay
+    pull_policy: build # built from this repository, never pulled from a registry
+    container_name: tax-collector-relay
+    restart: unless-stopped
+    # Only this computer can reach it. Tailscale Funnel puts HTTPS in front and makes it public.
+    ports:
+      - "127.0.0.1:8787:8787"
+    # The image believes Tailscale's X-Forwarded-For from private addresses (TC_TRUST_PROXY=private),
+    # which is safe while the port is bound to 127.0.0.1 as above. Host networking on Linux also
+    # works: delete the two "ports" lines, uncomment the next line, and set HOST: "127.0.0.1" and
+    # TC_TRUST_PROXY: "loopback" under environment.
+    # network_mode: host
+    volumes:
+      - data:/app/server/data
+    # Pins the setup code (README, "Setting up computers"). Don't commit your code to git.
+    # environment:
+    #   TC_SETUP_CODE: "<your setup code>"
+    # Keep Docker's copy of the log small: three files of 10 MB at most.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # The relay writes nothing outside its data folder.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  data:
+    # The volume that `docker run -v tcrelay-data:/app/server/data` uses, so both ways find the same data.
+    name: tcrelay-data

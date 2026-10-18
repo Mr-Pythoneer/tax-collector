@@ -1,0 +1,72 @@
+# Tax Collector relay server as a systemd service (Linux). Steps: server/README.md.
+#
+# Assumes:
+#   - the repository's server/ and parent/ folders are in /opt/tax-collector, so the server is
+#     /opt/tax-collector/server/server.mjs;
+#   - Node.js 22 or newer is /usr/bin/node. If `command -v node` says otherwise, change
+#     ExecStart. It can't be under /home (ProtectHome hides it), so not an nvm install;
+#   - a system user named tcrelay:
+#       sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin tcrelay
+#
+# The data folder is /var/lib/tax-collector-relay (StateDirectory; %S is /var/lib).
+# Optional settings, such as TC_SETUP_CODE=..., go in /etc/tax-collector-relay.env, one
+# NAME=value per line. Keep that file readable by root only: it's read before the service starts.
+#
+#   sudo cp tax-collector-relay.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now tax-collector-relay
+#   sudo journalctl -u tax-collector-relay     (the setup code is printed on first start)
+
+[Unit]
+Description=Tax Collector relay server
+After=network.target
+
+[Service]
+Type=simple
+User=tcrelay
+Group=tcrelay
+ExecStart=/usr/bin/node /opt/tax-collector/server/server.mjs
+Environment=HOST=127.0.0.1
+Environment=PORT=8787
+Environment=TC_DATA_DIR=%S/tax-collector-relay
+EnvironmentFile=-/etc/tax-collector-relay.env
+StateDirectory=tax-collector-relay
+StateDirectoryMode=0700
+UMask=0077
+Restart=always
+RestartSec=5
+
+# Hardening. The relay needs to read its code, write its data folder and talk to localhost.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service @pkey
+SystemCallFilter=~@privileged @resources
+# Refuse a blocked system call instead of killing Node, so a new Node version can't crash on one.
+SystemCallErrorNumber=EPERM
+# Node's JIT compiler needs memory that is writable and executable, so no MemoryDenyWriteExecute.
+# Only loopback traffic: Tailscale on this machine is the only thing that talks to the relay.
+# Remove these two lines if a proxy on another machine forwards to it instead.
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+[Install]
+WantedBy=multi-user.target
