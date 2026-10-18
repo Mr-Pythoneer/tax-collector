@@ -1,0 +1,84 @@
+{
+  "v": 1,
+  "note": "Test vectors for docs/parent-link-v1.md. The keys here are public test keys: never use them for anything real. Byte strings are base64url without padding; text is UTF-8.",
+  "normalise": [
+    [
+      "7kq2m-9xwhr",
+      "7KQ2M9XWHR"
+    ],
+    [
+      "abc def ghjk",
+      "ABCDEFGHJK"
+    ],
+    [
+      "o0-Il1 lO",
+      "0011110"
+    ],
+    [
+      "ABCDEFGHJKU",
+      "ABCDEFGHJK"
+    ]
+  ],
+  "pairing": {
+    "code": "7kq2m-9xwhr",
+    "normalised": "7KQ2M9XWHR",
+    "slot": "IJTFCy0oFo0lvOdAwbhXBw",
+    "pairKey": "KHGUbf-q72AAWu_5iHImhKa50KwcpTB6sWoAB1YFEUo",
+    "aad": "tc v1 pair|IJTFCy0oFo0lvOdAwbhXBw",
+    "hello": {
+      "plaintext": "{\"t\":\"hello\",\"v\":1,\"ch\":\"EBESExQVFhcYGRobHB0eHw\",\"name\":\"Test Mac\",\"platform\":\"mac\",\"dhKey\":\"BC0ahIs2oidowrwNv0ZGd_Rnhothq-FgtFkEx0MAxSpUI--cS4qIDVPgxs_8lxqMV2VunV0b3aok94F4iX_pZRE\"}",
+      "nonce": "oKGio6Slpqeoqaqr",
+      "box": "oKGio6SlpqeoqaqrQuECII8LvJf_UHbQnPNbPEYUOLXXZqpOPBYwEFyccnV9-4sSaz-0P1sVhhRsMQbfVlsI967cd3F9MRRzOYhZNqS-o22GwHteD-5C9ETEFyLdD21MkM1PnVwNiSEdTumFH3LB747cI6gp6TKKdpq6GNzOP7c4BqXkzfA3hZTha-xbncBMuSfxdj3pkZn_yrq-5v5gaplZhM1vWekHnK1OOTqFaBCaEZXaYgAU-0tLSgYeUU553lwz4gQJ0LP9nLsgQ8ciV2p9"
+    },
+    "phone": {
+      "signKey": {
+        "d": "hrPH4leN3gZPbiSu5dCrKAcS9jpKVjKSwjC4wEv2csk",
+        "x": "01WexG_PJJJPPCETNivQt5yShfVUbguWpQDD_gGh1n8",
+        "y": "BJA-ylRVazOvL8nmBSUGk_wZ-THcTdJsU6QimQDhnso",
+        "public": "BNNVnsRvzySSTzwhEzYr0LeckoX1VG4LlqUAw_4BodZ_BJA-ylRVazOvL8nmBSUGk_wZ-THcTdJsU6QimQDhnso"
+      },
+      "dhKey": {
+        "d": "mwh0NRkKmbMbRrBDMFASuATFcBe1fSD0RixmY9jTHjg",
+        "x": "xM8Sjb5tDaJ3d1b2SBNfd_Z2mfqh_-onBcDjGqC2LnE",
+        "y": "bJmUnkiKdU85ryHbPfMlNWfvv0tYb2IK-Up7xj-vGOc",
+        "public": "BMTPEo2-bQ2id3dW9kgTX3f2dpn6of_qJwXA4xqgti5xbJmUnkiKdU85ryHbPfMlNWfvv0tYb2IK-Up7xj-vGOc"
+      },
+      "nonce": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+      "token": "YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8",
+      "tokenHash": "TY0nT_fhdq-XepWgBVyMXzR404ZANDoGDO6JPlbzmVc",
+      "name": "Mom's iPhone"
+    },
+    "computer": {
+      "dhKey": {
+        "d": "VxYz3JpOJFGAQDTWgUrMZzZAwooGuGUiVQzbH72ZlDI",
+        "x": "LRqEizaiJ2jCvA2_RkZ39GeGi2Gr4WC0WQTHQwDFKlQ",
+        "y": "I--cS4qIDVPgxs_8lxqMV2VunV0b3aok94F4iX_pZRE",
+        "public": "BC0ahIs2oidowrwNv0ZGd_Rnhothq-FgtFkEx0MAxSpUI--cS4qIDVPgxs_8lxqMV2VunV0b3aok94F4iX_pZRE"
+      },
+      "nonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8"
+    },
+    "commit": "0C9jKkrQVMV1yxKC3ZZLI47DVT6DE17BCHsBupbuYyU",
+    "sas": "907267"
+  },
+  "link": {
+    "channel": "EBESExQVFhcYGRobHB0eHw",
+    "deviceId": "6f1c0e3a-2b4d-4c8e-9a1f-0d2e3c4b5a69",
+    "shared": "DC5N-AkL9LNwtHAY_JGVLZ7NETFBnPBJiRiBCpFPm5M",
+    "linkKey": "sBsiFhQcvD9OoeE--_0Iwn1v3ZwxVB8x_3NjY9ZE7mY"
+  },
+  "command": {
+    "body": "{\"v\":1,\"ch\":\"EBESExQVFhcYGRobHB0eHw\",\"dev\":\"6f1c0e3a-2b4d-4c8e-9a1f-0d2e3c4b5a69\",\"n\":1729200000123,\"at\":1729200000123,\"id\":\"0b8f2c64-7d1e-4f3a-9c5b-2e6d8a4f1b37\",\"type\":\"lock\",\"args\":{\"until\":1729210000000,\"strength\":\"homework\"}}",
+    "signature": "y0BXI8Da6oEA8jbEyiyU0Si9aWqHEKzNJd3rDJc2EL1aVBAw5VDke1RY2qMrKqpnQBGw7HOW26H-BuZKduD21g",
+    "tamperedSignature": "y0BXI8Da6oEA8jfEyiyU0Si9aWqHEKzNJd3rDJc2EL1aVBAw5VDke1RY2qMrKqpnQBGw7HOW26H-BuZKduD21g",
+    "aad": "tc v1 cmd|EBESExQVFhcYGRobHB0eHw|6f1c0e3a-2b4d-4c8e-9a1f-0d2e3c4b5a69",
+    "nonce": "sLGys7S1tre4ubq7",
+    "box": "sLGys7S1tre4ubq7Q35v0ceWhYxNDjrQrH58oLy0TpwPJhwJpDPPmKD0cRrw544eQeFi79NYcMqFDghEKwJAEwskpPwtv9PzPs5m3E23hTZsJ5sjn3brZZgDImkckxi7f76Zy-gCSgwq1wZAVByTs2oLWLDcVPrdKcZ9psWNQeHU-qvDzIA5BF-gN-uFVSpA-zGZgzff2rEWkLdPiW8z8qHUmimT-fIapnwsYAUCw9ACDEUysxEYp2ina6rBttXx41nGTO8bSpHi3AkDQQNkjrV2DHVtwtouNGK_EabWVpztaRrt2KMgIeaTvVo-vzC56rg7YnjhRUk2XNvRxjKRavHOgsI3SGq4oISv-IS6IP-jHPweTxBtvBNXbKS0ZOvwbcytZ6GOzdgIKLUpom1bm8oeqBk3H6O1RaXp5rncpy2xdA"
+  },
+  "state": {
+    "json": "{\"v\":1,\"seq\":1,\"sentAt\":1729200000000,\"computer\":{\"name\":\"Test Mac\",\"platform\":\"mac\",\"app\":\"0.7.0\",\"os\":\"macOS\",\"timeZone\":\"UTC\",\"capabilities\":[\"lock\"]},\"access\":{\"mode\":\"normal\",\"until\":null,\"strength\":null,\"by\":\"\",\"at\":0},\"lock\":{\"locked\":false,\"reasons\":[]},\"tasks\":[],\"repeats\":[],\"apps\":{\"builtIn\":[],\"allowed\":[],\"blocked\":[],\"running\":[],\"recent\":[]},\"settings\":{\"penaltyMinutes\":30,\"extensionsEnabled\":true},\"trackRecord\":{\"onTime\":0,\"late\":0,\"missed\":0,\"extensionsThisWeek\":0},\"activity\":[],\"results\":[],\"devices\":[],\"flags\":[],\"message\":null}",
+    "deflated": "VVBNT8MwDP0rKOdqKnCY6A0hDhwmJChCAnFwU6-LmjilcQfTtP-O3aYHcomfP56f39kcTXVdmITf-Se-Zwm3N3c3ZX6FsTEME-NoqrMhCGgqU2Piqx1YU5jBA-_jGCQb5gQMg8TlZrspBcW0FJ5fBbAL-BFJGd7qB0lYGKBx3rFD6fs0PtrefF2ExFpMSTeG2Go_yQrwMjIRO28qmrwXxTwidXxYcXOSVtUgV5RCM_MJif7YmmoPPmFhRoQUSTfqLobUz7EWBgTOQA6ZFTST8_xEOel9_FEqBc3KO89ORI66lciKmXlBQmapzGQDEng-7RyJpZK5FYPxl5GSE0WPBI1XQh4nVGkj2P4FbRxbHY5UO_VfZsT1JQguJZ34x1MfXHpH7BcXwLI7Oj6t0tLk1xtbPDqLGew9dDkM4j50uPh6-QM",
+    "aad": "tc v1 state|EBESExQVFhcYGRobHB0eHw|6f1c0e3a-2b4d-4c8e-9a1f-0d2e3c4b5a69",
+    "nonce": "wMHCw8TFxsfIycrL",
+    "box": "wMHCw8TFxsfIycrLfRpF-5-1MwkXvVMr5ZExPz1xX8z8pg1AzZWLHcUNo7AQmSEeESllXJtgYR-lnf0oM_LG3bJhbnnRWCbiZNacIX34doCmTXYbL2792EQbtXw_bYjn_M5DNw0KsdMhd09jqf4DxdmrNCcNCrwi6hu9puEJc5y6qaUJMR3h3exsC4p-_Yb6itS9-vNf9a_yCMfKCWwYQxAjQgo-g3TVxatnLZlX6guZFXFpWRKURM33n105JEMiUWo4RwqKZr0I1_o4qTFAe3CepPDw6oHan5_oD1Q7TScOgZSumYzLbQI0mponU1ygVVcZ4f8Dum3hrtLJcusFb-5KD5mWODwBa7jHU9Gc6R9XW7pRA9q5CbMBdAvUJiI8BGaVuj0ddJDZlx2YDZwwUQ8LfzWXO3lb1g3f2WblHNScVpTUgtSg_unWCxhw_BQfKGFpVnkyxiz8YdwIiSNX"
+  }
+}
