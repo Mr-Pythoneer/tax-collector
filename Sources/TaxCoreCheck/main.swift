@@ -1189,7 +1189,7 @@ struct CommandRules {
     func body(_ type: String, _ args: String, n: Int64? = nil, at a: Int64? = nil, ch: String? = nil) -> String {
         #"{"v":1,"ch":"\#(ch ?? channel)","dev":"\#(device)","n":\#(n ?? at),"at":\#(a ?? at),"id":"c1","type":"\#(type)","args":\#(args)}"#
     }
-    func admit(_ b: Data, last: Int64 = 0, received: Int64? = nil) -> Result<ParentCommand, CommandRejection> {
+    func admit(_ b: Data, last: Int64 = 0, received: Int64? = nil) -> Result<ParentCommand, GateRejection> {
         CommandGate.admit(box: b, linkKey: key, signKey: signer.publicKey.x963Representation, channel: channel,
                           device: device, receivedAt: received ?? at, lastCounter: last)
     }
@@ -1204,17 +1204,19 @@ struct CommandRules {
         let block = admit(box(body("blockApp", #"{"app":{"id":"org.game","name":"Game"}}"#)))
         expect((try? block.get().action)??.setting == "app:org.game")
         let rep = admit(box(body("addRepeat", #"{"repeat":{"id":"0b8f2c64-7d1e-4f3a-9c5b-2e6d8a4f1b37","title":"Math","details":"","unit":"days","interval":4,"weekdays":[],"minuteOfDay":510,"startDate":"2026-10-19"}}"#)))
-        if case let .addRepeat(r)?? = try? rep.get().action { expect(r.unit == .days && r.interval == 4 && r.minuteOfDay == 510) } else { expect(false) }
+        if case let .addRepeat(r)? = (try? rep.get())?.action { expect(r.unit == .days && r.interval == 4 && r.minuteOfDay == 510) } else { expect(false) }
         // Unknown types get through the gate with no action: answered "unsupported".
         let unknown = admit(box(body("makeCoffee", "{}")))
         expect((try? unknown.get())?.action == nil && (try? unknown.get())?.type == "makeCoffee")
     }
 
     func badCommandsAreRejected() {
-        func reason(_ r: Result<ParentCommand, CommandRejection>) -> CommandRejection? {
-            if case let .failure(e) = r { return e }
+        func reason(_ r: Result<ParentCommand, GateRejection>) -> CommandRejection? {
+            if case let .failure(e) = r { return e.reason }
             return nil
         }
+        // After a good signature, the rejection names the command, so the phone can match it up.
+        if case let .failure(e) = admit(box(body("normal", "{}")), last: at) { expect(e.command?.id == "c1" && e.command?.counter == at) } else { expect(false) }
         let ok = body("normal", "{}")
         expect(reason(admit(box(ok), last: at)) == .replayed)
         expect(reason(admit(box(ok), received: at + 11 * 60 * 1000)) == .stale)

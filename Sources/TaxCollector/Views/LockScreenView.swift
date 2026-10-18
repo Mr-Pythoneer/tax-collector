@@ -71,6 +71,14 @@ struct LockScreenView: View {
 
     private var explanation: String {
         if !model.lock.isLocked { return "Everything is open again. You can close this window." }
+        if let parentLock = model.lock.parentLock {
+            let until = parentLock.until.map { " until \(Fmt.time.string(from: $0))" } ?? " until they unlock it"
+            let what = parentLock.strength == .all
+                ? "Every app closes except Finder and Tax Collector."
+                : "Apps other than the ones allowed below keep closing."
+            let note = parentLock.note.map { " \u{201C}\($0)\u{201D}" } ?? ""
+            return "\(parentLock.by) locked this Mac\(until). \(what)\(note)"
+        }
         if !model.lock.overdue.isEmpty {
             let count = model.lock.overdue.count
             return "\(count == 1 ? "A task is" : "\(count) tasks are") overdue. Apps other than the ones allowed below will keep closing until you submit proof."
@@ -82,6 +90,7 @@ struct LockScreenView: View {
     }
 
     private var allowedApps: String {
+        if model.lock.strength == .all { return "None: a parent locked everything." }
         var names = Allowlist.apps.map(\.name)
         let extra = model.settings.extraAllowedBundleIDs.count
         if extra > 0 { names.append("\(extra) more added by your guardian") }

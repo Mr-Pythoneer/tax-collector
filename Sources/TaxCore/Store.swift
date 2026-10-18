@@ -60,7 +60,9 @@ public final class Store {
     }
 
     public func log(_ message: String, at date: Date = Date()) {
-        let line = "\(Self.stamp.string(from: date))  \(message)\n"
+        // One event per line, always: a task title with a line break in it mustn't fake a "GUARDIAN …" line.
+        let flat = message.map { "\n\r\u{2028}\u{2029}\u{85}\u{0B}\u{0C}".contains($0) ? " " : $0 }
+        let line = "\(Self.stamp.string(from: date))  \(String(flat))\n"
         guard let data = line.data(using: .utf8) else { return }
         if let handle = try? FileHandle(forWritingTo: logURL) {
             handle.seekToEndOfFile()

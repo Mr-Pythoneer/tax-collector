@@ -89,6 +89,8 @@ private struct GuardianPanel: View {
             Form {
                 unlockSection
                 tasksSection
+                ParentsSection()
+                BlockedAppsSection()
                 rulesSection
                 codeSection
                 Section {
@@ -112,6 +114,13 @@ private struct GuardianPanel: View {
 
     private var unlockSection: some View {
         Section("Unlock") {
+            if let parentLock = model.lock.parentLock {
+                HStack {
+                    Text("Locked by \(parentLock.by)" + (parentLock.until.map { " until \(Fmt.dateTime.string(from: $0))" } ?? ""))
+                    Spacer()
+                    Button("Lift") { model.backToNormal(by: AppModel.guardianName) }
+                }
+            }
             if let until = model.lock.overrideUntil {
                 HStack {
                     Text("Unlocked until \(Fmt.dateTime.string(from: until))")

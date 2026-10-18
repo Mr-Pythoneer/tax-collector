@@ -16,6 +16,9 @@ public struct LinkFile: Codable, Equatable, Sendable {
     public var settingTimes: [String: Int64]
     public var stateSeq: Int64
     public var results: [CommandResult]
+    /// Small facts the link keeps to notice tampering: fingerprints of the guardian code and the rules, the last
+    /// time the app was alive, recent warnings.
+    public var notes: [String: String]
 
     public init(serverURL: String, setupCode: String, channel: String = LinkCrypto.base64url(LinkCrypto.randomBytes(16)),
                 computerToken: String = LinkCrypto.base64url(LinkCrypto.randomBytes(32)),
@@ -30,6 +33,7 @@ public struct LinkFile: Codable, Equatable, Sendable {
         settingTimes = [:]
         stateSeq = 0
         results = []
+        notes = [:]
     }
 
     public var privateKey: P256.KeyAgreement.PrivateKey? {
