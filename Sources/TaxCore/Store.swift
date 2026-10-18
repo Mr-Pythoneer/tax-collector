@@ -21,6 +21,7 @@ public final class Store {
     private var guardianURL: URL { dir.appendingPathComponent("guardian.json") }
     private var blackbaudURL: URL { dir.appendingPathComponent("blackbaud.json") }
     private var recurringURL: URL { dir.appendingPathComponent("recurring.json") }
+    public var linkURL: URL { dir.appendingPathComponent("parent-link.json") }
     public var logURL: URL { dir.appendingPathComponent("events.log") }
     public var proofsRoot: URL { dir.appendingPathComponent("proofs", isDirectory: true) }
 
@@ -39,6 +40,17 @@ public final class Store {
     public func loadRecurring() -> [RecurringTask] { load([RecurringTask].self, from: recurringURL) ?? [] }
     public func saveRecurring(_ series: [RecurringTask]) { save(series, to: recurringURL) }
 
+    public func loadLink() -> LinkFile? { load(LinkFile.self, from: linkURL) }
+    /// Readable only by this account. That keeps out other accounts, not the student (docs/parent-link-v1.md §9).
+    public func saveLink(_ link: LinkFile?) {
+        guard let link else {
+            try? FileManager.default.removeItem(at: linkURL)
+            return
+        }
+        save(link, to: linkURL)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: linkURL.path)
+    }
+
     public func proofFolder(task: UUID, submission: UUID) -> URL {
         let url = proofsRoot
             .appendingPathComponent(task.uuidString, isDirectory: true)
@@ -48,7 +60,9 @@ public final class Store {
     }
 
     public func log(_ message: String, at date: Date = Date()) {
-        let line = "\(Self.stamp.string(from: date))  \(message)\n"
+        // One event per line, always: a task title with a line break in it mustn't fake a "GUARDIAN …" line.
+        let flat = message.map { "\n\r\u{2028}\u{2029}\u{85}\u{0B}\u{0C}".contains($0) ? " " : $0 }
+        let line = "\(Self.stamp.string(from: date))  \(String(flat))\n"
         guard let data = line.data(using: .utf8) else { return }
         if let handle = try? FileHandle(forWritingTo: logURL) {
             handle.seekToEndOfFile()

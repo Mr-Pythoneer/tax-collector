@@ -45,6 +45,21 @@ public enum Allowlist {
         "com.anthropic.claude-code-url-handler",
     ]
 
+    /// The one rule for closing an app. The system and Tax Collector itself are never closed. A blocked app is
+    /// closed whenever it runs. During a lock, everything not allowed is closed, and with a parent's
+    /// "everything" lock, the allowed apps too.
+    public static func shouldClose(bundleID: String?, locked: Bool, strength: LockStrength, extra: [String],
+                                   blocked: [String], selfID: String?) -> Bool {
+        if let id = bundleID {
+            if let selfID, id == selfID { return false }
+            if implicit.contains(id) { return false }
+            if blocked.contains(where: { id == $0 || id.hasPrefix($0 + ".") }) { return true }
+        }
+        guard locked else { return false }
+        if strength == .all { return true }
+        return !isAllowed(bundleID: bundleID, extra: extra, selfID: selfID)
+    }
+
     /// Exact match, or a helper whose ID starts with an allowed ID (e.g. `us.zoom.xos.Helper`).
     public static func isAllowed(bundleID: String?, extra: [String], selfID: String?) -> Bool {
         guard let id = bundleID else { return false }

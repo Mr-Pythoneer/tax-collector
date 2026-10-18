@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private var isTestCopy = false
     /// The self-test locks and unlocks a scratch copy many times; none of that should reach your screen.
     private var isSelfTest = false
+    private(set) var parentLink: ParentLinkClient!
 
     private static let showNotification = Notification.Name(AppModel.label + ".show")
 
@@ -35,10 +36,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         setupAllowed = !testing || env["TAXCOLLECTOR_TEST_SETUP"] == "1"
         isTestCopy = testing
         let snapshotPath = testing ? env["TAXCOLLECTOR_TEST_SNAPSHOT"].flatMap { $0.isEmpty ? nil : $0 } : nil
-        isSelfTest = testing && (env["TAXCOLLECTOR_SELFTEST"] == "1" || snapshotPath != nil)
+        // A quiet test copy (the parent-link end-to-end test) shows nothing: no windows, menu icon or notifications.
+        let quiet = testing && env["TAXCOLLECTOR_TEST_QUIET"] == "1"
+        isSelfTest = testing && (env["TAXCOLLECTOR_SELFTEST"] == "1" || snapshotPath != nil || quiet)
         if !testing { enforceSingleInstance() }
 
         model = AppModel(store: Store(), dryRun: dryRun)
+        parentLink = ParentLinkClient(store: model.store)
+        parentLink.model = model
+        parentLink.isTestCopy = testing
+        model.onLocalSetting = { [weak self] in self?.parentLink.noteLocal($0) }
+        model.onParentAction = { [weak self] text in
+            self?.notify("Tax Collector", text)
+            self?.showBanner(text)
+        }
         if let only = env["TAXCOLLECTOR_ENFORCE_ONLY"], !only.isEmpty {
             model.enforcer.onlyTargets = Set(only.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
         }
@@ -47,8 +58,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         model.onWarning = { [weak self] in self?.warn($0, remaining: $1) }
         model.onClosedApp = { [weak self] name in
             guard let self else { return }
-            self.showLockWindow()
-            self.showBanner(self.model.dryRun ? "Test mode: would have closed \(name)" : "Closed \(name). Submit proof to unlock.")
+            if self.model.lock.isLocked {
+                self.showLockWindow()
+                self.showBanner(self.model.dryRun ? "Test mode: would have closed \(name)" : "Closed \(name). Submit proof to unlock.")
+            } else {
+                self.showBanner(self.model.dryRun ? "Test mode: would have closed \(name)" : "Closed \(name): a parent blocked it.")
+            }
         }
         model.onPaid = { [weak self] task in
             self?.notify("Proof accepted", Agenda.courseAndTitle(task).title)
@@ -138,7 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         }
 
         // A snapshot run stays completely out of sight: no menu bar icon either.
-        if snapshotPath == nil { setUpStatusItem() }
+        if snapshotPath == nil && !quiet { setUpStatusItem() }
         setUpNotifications()
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.willPowerOffNotification, object: nil, queue: .main
@@ -154,7 +169,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
         model.start()
         let startedAtLogin = CommandLine.arguments.contains("--launchd")
-        if snapshotPath == nil && (model.guardian == nil || !startedAtLogin) { showMain() }
+        if snapshotPath == nil && !quiet && (model.guardian == nil || !startedAtLogin) { showMain() }
+        parentLink.start()
+        startParentLinkTest(env, testing: testing)
         refreshSetupNeed()
         if startedAtLogin && model.settings.justSetUp {
             model.settings.justSetUp = false
@@ -238,6 +255,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         }
     }
 
+    /// Testing aid, in test copies only: `TAXCOLLECTOR_PARENT_SERVER` + `TAXCOLLECTOR_PARENT_SETUP` link to a server,
+    /// `TAXCOLLECTOR_TEST_PAIR=1` starts pairing and writes the code to pairing-code.txt, and
+    /// `TAXCOLLECTOR_TEST_PAIR_AUTOCONFIRM=1` approves without the guardian code. For scripts/parent-link-e2e.sh.
+    private func startParentLinkTest(_ env: [String: String], testing: Bool) {
+        guard testing, let server = env["TAXCOLLECTOR_PARENT_SERVER"], !server.isEmpty else { return }
+        parentLink.autoConfirmPairing = env["TAXCOLLECTOR_TEST_PAIR_AUTOCONFIRM"] == "1"
+        Task {
+            if !parentLink.isConfigured {
+                if let problem = await parentLink.setUp(server: server, setupCode: env["TAXCOLLECTOR_PARENT_SETUP"] ?? "") {
+                    model.store.log("PARENT test setup failed: \(problem)")
+                    return
+                }
+            }
+            guard env["TAXCOLLECTOR_TEST_PAIR"] == "1" else { return }
+            parentLink.startPairing()
+            if case let .waiting(code, _) = parentLink.pairing {
+                try? code.write(to: model.store.dir.appendingPathComponent("pairing-code.txt"), atomically: true, encoding: .utf8)
+            }
+        }
+    }
+
     /// `TAXCOLLECTOR_TEST_SHEET=name` or `name:part of a task title`.
     private func openTestSheet(_ spec: String) {
         let (kind, sheet, task) = testScreen(spec)
@@ -272,7 +310,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         let hosting = NSHostingView(rootView: content
             .background(Color(nsColor: .windowBackgroundColor))
             .environment(model)
-            .environment(router))
+            .environment(router)
+            .environment(parentLink))
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size ?? NSSize(width: 600, height: 400)),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -443,7 +482,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                               backing: .buffered, defer: false)
         window.title = title
         window.isReleasedWhenClosed = false
-        let hosting = NSHostingView(rootView: content.environment(model).environment(router))
+        let hosting = NSHostingView(rootView: content.environment(model).environment(router).environment(parentLink))
         if toolbar {
             // Let the SwiftUI toolbar and title become the window's own.
             hosting.sceneBridgingOptions = [.toolbars, .title]

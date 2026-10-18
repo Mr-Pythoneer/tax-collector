@@ -506,6 +506,46 @@ enum SelfTest {
         model.settings.overrideUntil = nil
         model.tick()
 
+        // What a parent's phone can do
+        model.settings.overrideUntil = nil
+        var outcome = model.applyParent(.lock(until: Date().addingTimeInterval(600), strength: .all, note: "Dinner"), by: "Test Phone")
+        model.tick()
+        check("parent: a phone's lock locks, everything closed", outcome.0 == "applied" && model.lock.isLocked && model.lock.strength == .all)
+        outcome = model.applyParent(.free(until: Date().addingTimeInterval(600)), by: "Test Phone")
+        model.tick()
+        check("parent: an unlock beats it", !model.lock.isLocked && model.settings.parentLock == nil)
+        _ = model.applyParent(.normal, by: "Test Phone")
+        _ = model.applyParent(.blockApp(AppRef(id: "org.example.game", name: "Game")), by: "Test Phone")
+        model.tick()
+        check("parent: a blocked app keeps the enforcer running while unlocked", model.enforcer.isActive && !model.lock.isLocked)
+        _ = model.applyParent(.unblockApp(AppRef(id: "org.example.game", name: "Game")), by: "Test Phone")
+        model.tick()
+        check("parent: unblocking stops it", !model.enforcer.isActive)
+        let phoneTask = UUID()
+        _ = model.applyParent(.addTask(id: phoneTask, title: "From a phone", details: "", due: Date().addingTimeInterval(3 * 86400)), by: "Test Phone")
+        let twice = model.applyParent(.addTask(id: phoneTask, title: "From a phone", details: "", due: Date().addingTimeInterval(3 * 86400)), by: "Test Phone")
+        check("parent: the same task sent twice is added once", twice.0 == "noop" && model.tasks.filter { $0.id == phoneTask }.count == 1)
+        if let i = model.tasks.firstIndex(where: { $0.id == phoneTask }) {
+            let first = ProofSubmission(submittedAt: Date(), note: "first", attachments: [], verdict: .rejected, reason: "x")
+            let second = ProofSubmission(submittedAt: Date(), note: "second", attachments: [], verdict: .rejected, reason: "y")
+            model.tasks[i].proofs = [first, second]
+            let approved = model.applyParent(.approveProof(taskID: phoneTask, proofID: first.id), by: "Test Phone")
+            let after = model.task(phoneTask)
+            check("parent: approving names the exact proof", approved.0 == "applied" && after?.isPending == false
+                  && after?.proofs.first?.verdict == .guardianApproved && after?.proofs.last?.verdict == .rejected)
+        }
+        _ = model.delete(phoneTask, guardianApproved: true)
+        let savedGuardian = model.guardian
+        model.guardian = nil
+        model.settings.parentLinked = true
+        check("parent: no guardian code while linked asks for a parent", model.needsParentForGuardianSetup)
+        _ = model.applyParent(.allowGuardianSetup(until: Date().addingTimeInterval(300)), by: "Test Phone")
+        check("parent: until a parent allows a new one", !model.needsParentForGuardianSetup)
+        model.guardian = savedGuardian
+        model.settings.parentLinked = false
+        model.guardianSetupAllowedUntil = nil
+        model.tick()
+
         // Everything ends up on disk
         let saved = model.store.loadTasks()
         check("storage: tasks on disk match the app", Set(saved.map(\.id)) == Set(model.tasks.map(\.id)))
