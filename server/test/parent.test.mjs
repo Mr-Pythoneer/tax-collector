@@ -166,6 +166,10 @@ test("command labels and words for parents", () => {
   assert.equal(f.commandLabel("setPenalty", { minutes: 90 }, s, NOW), "Late penalty: 1 hour 30 minutes");
   assert.equal(f.duration(0), "No penalty");
   assert.equal(f.flagTitle("gap"), "Tax Collector wasn't running");
+  assert.equal(f.approvalNote("Approved by Test iPhone."), "Approved by Test iPhone.", "the computer's note, not Claude's");
+  assert.equal(f.approvalNote("Approved by your guardian."), "Approved by a parent at the computer.");
+  assert.equal(f.approvalNote(""), "Approved by a parent");
+  assert.equal(f.approvalNote(undefined), "Approved by a parent");
   assert.equal(phone.cleanDeviceName("  Mom's\niPhone that has a very very long name indeed  "), "Mom's iPhone that has a very very long n");
   assert.ok(f.courseSlot("Math 8") >= 0 && f.courseSlot("Math 8") < 8);
   assert.equal(f.courseSlot("Math 8"), f.courseSlot("math 8"), "case doesn't matter");

@@ -182,6 +182,17 @@ export function proofVerdict(p) {
   }
 }
 
+/**
+ * For a parent-approved proof, `reason` is the computer's own note ("Approved by Mom's iPhone."),
+ * not Claude's. The Mac names its guardian "your guardian", worded for the student.
+ */
+export function approvalNote(reason) {
+  const note = String(reason ?? "").trim();
+  if (!note) return "Approved by a parent";
+  if (/^approved by your guardian\.?$/i.test(note)) return "Approved by a parent at the computer.";
+  return note;
+}
+
 export function taskStatus(t, now, tz) {
   switch (t.status) {
     case "proven": return "Done on time" + (t.statusAt ? ", " + when(t.statusAt, now, tz) : "");

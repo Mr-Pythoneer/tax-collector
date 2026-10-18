@@ -569,6 +569,7 @@ const COMMANDS = {
     if (!p) return ["rejected", "not_found"];
     if (t.status !== "pending") return ["noop", "It's settled already."];
     p.verdict = "guardianApproved";
+    p.reason = `Approved by ${d.name}.`; // the computer's own note, as the Mac writes it
     const onTime = p.at <= t.due;
     Object.assign(t, { status: onTime ? "proven" : "provenLate", statusAt: this.now(), checking: false,
       penaltyEndsAt: onTime ? null : this.now() + this.model.settings.penaltyMinutes * MINUTE });

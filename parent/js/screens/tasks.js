@@ -71,8 +71,7 @@ export function renderTask({ app, view, params }) {
         h("span", { class: "row-title", text: `Sent ${f.when(p.at, now, tz)}${p.files ? ` · ${p.files} file${p.files === 1 ? "" : "s"}` : " · written"}${onTime ? "" : " · late"}` }),
         p.note && h("span", { class: "row-line quote" }, h("span", { class: "quote-who", text: "Student's note: " }), p.note),
         p.verdict === "guardianApproved"
-          ? [h("span", { class: "row-line verdict verdict-guardianApproved" }, h("span", { class: "quote-who", text: verdict })),
-            p.reason && h("span", { class: "row-line quote" }, h("span", { class: "quote-who", text: "Claude had said: " }), p.reason)]
+          ? h("span", { class: "row-line verdict verdict-guardianApproved" }, h("span", { class: "quote-who", text: f.approvalNote(p.reason) }))
           : h("span", { class: ["row-line", "verdict", "verdict-" + (p.verdict ?? "waiting")] },
             h("span", { class: "quote-who", text: verdict + (p.reason ? ": " : "") }), p.reason ?? ""),
         canApprove && h("button", { type: "button", class: "inline-button", text: "Approve This Proof", onclick: approve })));
