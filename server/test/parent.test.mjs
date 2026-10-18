@@ -221,3 +221,35 @@ test("the server's list, the service worker's list and the files agree", () => {
   for (const icon of manifest.icons) assert.ok(FILES.some(([url]) => url === icon.src), `icon ${icon.src} isn't served`);
   assert.equal(manifest.display, "standalone");
 });
+
+test("fields left out read as null (§8: Swift's encoder omits nils)", () => {
+  // What the Mac sends when every optional field is nil: the keys aren't there at all.
+  const s = {
+    v: 1, seq: 3, sentAt: NOW,
+    computer: { name: "Mac", platform: "mac", app: "0.7.0", os: "macOS", timeZone: TZ, capabilities: ["lock", "tasks"] },
+    access: { mode: "locked", by: "Mom's iPhone", at: at(2026, 10, 19, 19) },
+    lock: { locked: true, reasons: [{ kind: "parent" }] },
+    tasks: [
+      { id: "t1", title: "No course", details: "", due: NOW - 60_000, created: NOW - 86400_000, status: "pending", source: "manual", checking: false,
+        proofs: [{ id: "p1", at: NOW - 120_000, files: 1, note: "", reason: "" }], extensions: [{ at: NOW, hoursAsked: 2, hoursGranted: 0, reason: "", answer: "" }] },
+      { id: "t2", title: "Done", details: "", due: NOW - 86400_000, created: NOW - 2 * 86400_000, status: "proven", source: "manual", checking: false, proofs: [], extensions: [] },
+    ],
+    repeats: [{ id: "r1", title: "Piano", details: "", unit: "weeks", interval: 1, weekdays: [2], minuteOfDay: 1080, startDate: "2026-10-19", schedule: "Every Monday at 6:00 PM" }],
+    apps: { builtIn: [], allowed: [], blocked: [], running: [], recent: [{ id: "x", name: "X" }] },
+    settings: { penaltyMinutes: 30, extensionsEnabled: true },
+    trackRecord: { onTime: 0, late: 0, missed: 0, extensionsThisWeek: 0 },
+    activity: [], results: [{ dev: "d", n: 1, id: "c", type: "lock", outcome: "applied", reason: "", at: NOW }], devices: [], flags: [],
+  };
+  const summary = f.statusSummary(s, NOW);
+  assert.equal(summary.headline, "Locked by Mom's iPhone until someone unlocks it", "no until means until lifted");
+  assert.match(summary.detail, /homework apps allowed/);
+  const sections = f.taskSections(s.tasks, NOW, TZ);
+  assert.deepEqual(sections.map((x) => x.kind), ["overdue", "done"]);
+  assert.equal(f.taskStatus(s.tasks[1], NOW, TZ), "Done on time", "no statusAt");
+  assert.equal(f.proofVerdict(s.tasks[0].proofs[0]), "Waiting for Claude", "no verdict yet");
+  assert.equal(f.commandLabel("lock", { until: null, strength: "all" }, s, NOW), "Lock until you unlock it");
+  assert.equal(phone.resultFor(s, "d", "c").outcome, "applied");
+  const free = f.statusSummary({ ...s, access: { mode: "free", until: at(2026, 10, 19, 22), at: 0 }, lock: { locked: false, reasons: [] } }, NOW);
+  assert.equal(free.headline, "Unlocked until 10:00 PM", "no by");
+  assert.equal(f.statusSummary({ ...s, access: { mode: "normal", at: 0 }, lock: { locked: false, reasons: [] }, tasks: [] }, NOW).headline, "Not locked");
+});

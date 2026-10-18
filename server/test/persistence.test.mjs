@@ -355,7 +355,7 @@ test("bad settings stop the server with one line saying what's wrong", async () 
     for (const [env, words] of [
       [{ PORT: "eighty" }, /PORT must be a number/],
       [{ PORT: "70000" }, /PORT must be a number/],
-      [{ TC_SETUP_CODE: "short" }, /TC_SETUP_CODE must have 12/],
+      [{ TC_SETUP_CODE: "short" }, /setup code must have 12/],
       [{ TC_TRUST_PROXY: "everyone" }, /TC_TRUST_PROXY: "everyone"/],
     ]) {
       const result = await promisify(execFile)(process.execPath, [server], { env: { ...inherited, TC_DATA_DIR: join(top, "data"), ...env }, timeout: 10_000 }).then(
@@ -370,4 +370,33 @@ test("bad settings stop the server with one line saying what's wrong", async () 
   } finally {
     await rm(top, { recursive: true, force: true });
   }
+});
+
+test("node server.mjs PORT SETUPCODE (for test scripts): that code, a new empty data folder, deleted when it stops", async () => {
+  const { spawn } = await import("node:child_process");
+  const { existsSync } = await import("node:fs");
+  const server = fileURLToPath(new URL("../server.mjs", import.meta.url));
+  const { NODE_TEST_CONTEXT, TC_DATA_DIR, TC_SETUP_CODE, PORT, ...inherited } = process.env;
+  const child = spawn(process.execPath, [server, "0", "e2e5-etpc-0de1"], { env: inherited, stdio: ["ignore", "pipe", "pipe"] });
+  let out = "";
+  const listening = new Promise((resolve, reject) => {
+    child.stdout.on("data", (d) => {
+      out += d;
+      if (/Data folder: .*\n/.test(out) && /listening on (http:\/\/\S+)/.test(out)) resolve();
+    });
+    child.once("exit", (code) => reject(new Error(`exited ${code}: ${out}`)));
+  });
+  await listening;
+  const base = out.match(/listening on (http:\/\/\S+)/)[1];
+  const folder = out.match(/Data folder: (.*) \(temporary/)[1];
+  assert.ok(existsSync(join(folder, "server.json")));
+  assert.ok(!/Setup code:/.test(out), "a throwaway relay doesn't announce a setup code");
+  const ch = channelId();
+  const token = newToken();
+  const created = await call(base, "PUT", `/v1/channels/${ch}`, { token: token.token, body: { setupCode: "E2E5ETPC0DE1", tokenHash: token.hash } });
+  assert.equal(created.status, 201, "the code from the command line is the setup code");
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  child.kill("SIGTERM");
+  assert.equal(await exited, 0);
+  assert.ok(!existsSync(folder), "the temporary data folder is gone");
 });

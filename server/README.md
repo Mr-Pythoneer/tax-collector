@@ -22,7 +22,7 @@ It needs Node.js 22 or newer and nothing else: no `npm install`. From the reposi
 node server/server.mjs
 ```
 
-It listens on `http://127.0.0.1:8787`, keeps its data in `server/data`, and prints the setup code the first time it starts. `node server/server.mjs --setup-code` shows the code again. To check that it answers:
+It listens on `http://127.0.0.1:8787`, keeps its data in `server/data`, and prints the setup code the first time it starts. `node server/server.mjs --setup-code` shows the code again. Test scripts can start a throwaway relay with `node server/server.mjs <port> <setup code>`: that port, that setup code (12 Crockford characters), and a new empty data folder that's deleted when it stops. To check that it answers:
 
 ```sh
 curl http://127.0.0.1:8787/v1/health
@@ -47,7 +47,7 @@ Run it:
 
 ```sh
 docker run -d --name tax-collector-relay --restart unless-stopped \
-  -p 127.0.0.1:8787:8787 -v tcrelay-data:/data tax-collector-relay
+  -p 127.0.0.1:8787:8787 -v tcrelay-data:/app/server/data tax-collector-relay
 ```
 
 Or let Docker Compose build and run it in one step. Its file, `server/deploy/compose.yaml`, also makes the container's file system read-only.
@@ -72,7 +72,7 @@ docker exec tax-collector-relay node server/server.mjs --setup-code
 
 Good to know:
 
-- The relay runs as the image's `node` user (uid 1000). A named volume, as above, is made writable for it automatically. If you use a folder on the host instead (`-v /some/folder:/data`), make uid 1000 its owner first.
+- The relay runs as the image's `node` user (uid 1000). A named volume, as above, is made writable for it automatically. If you use a folder on the host instead (`-v /some/folder:/app/server/data`), make uid 1000 its owner first.
 - Behind a published port, requests reach the relay from Docker's own address, not from loopback. So the image sets `TC_TRUST_PROXY=private`: the relay believes the `X-Forwarded-For` that Tailscale adds when a request comes from a private address, and its [per-address limits](#limits) see each visitor's own address. That's safe while the port is published on `127.0.0.1` only, as above. If you publish it on your whole network, set `TC_TRUST_PROXY` to Docker's bridge range instead (usually `172.17.0.1`), or use host networking on Linux: `--network host -e HOST=127.0.0.1 -e TC_TRUST_PROXY=loopback` in place of `-p 127.0.0.1:8787:8787`.
 - On Windows, prefer the [scheduled task](#on-windows): Docker Desktop only runs while someone is signed in.
 
@@ -170,7 +170,7 @@ Keep the setup code and the address somewhere safe, such as a password manager. 
 |---|---|---|
 | `PORT` | `8787` | The port the relay listens on. |
 | `HOST` | `127.0.0.1` (Docker image: `0.0.0.0`) | The address it listens on. Keep it local: Tailscale reaches it there. Inside Docker, `0.0.0.0` lets the published port reach it. |
-| `TC_DATA_DIR` | `server/data` (Docker image: `/data`) | The data folder, with the setup code and the computers' channels. It must last across restarts. |
+| `TC_DATA_DIR` | `server/data` (in the Docker image, `/app/server/data`) | The data folder, with the setup code and the computers' channels. It must last across restarts. |
 | `TC_SETUP_CODE` | not set | Pins the 12-character setup code ([above](#setting-up-computers)). |
 | `TC_TRUST_PROXY` | `loopback` (Docker image: `private`) | Which proxies to believe about the visitor's address, for rate limits: for a request from one of them, the last `X-Forwarded-For` entry counts (Tailscale Funnel puts the real visitor's address there). `loopback`: this computer only. `private`: also private networks (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7). A comma-separated list of addresses and ranges, like `172.17.0.1,10.0.0.0/8`: loopback plus those. `0`: nobody. |
 | `TC_LOG_REQUESTS` | off | `1` logs one line per request: time, method, route, status and duration. Never bodies or tokens, and channel IDs only as short hashes. |
@@ -182,12 +182,12 @@ The data folder is small. It holds the setup code, the relay's instance ID, and 
 
 | Running with | Data folder |
 |---|---|
-| Docker | the `tcrelay-data` volume (`/data` in the container) |
+| Docker | the `tcrelay-data` volume (`/app/server/data` in the container) |
 | systemd | `/var/lib/tax-collector-relay` |
 | Windows | `C:\ProgramData\TaxCollectorRelay\data` |
 | A quick try | `server/data` |
 
-To back it up, copy the folder. With Docker: `docker cp tax-collector-relay:/data ./relay-backup`. Copying while the relay runs is fine, because it replaces each file in one step.
+To back it up, copy the folder. With Docker: `docker cp tax-collector-relay:/app/server/data ./relay-backup`. Copying while the relay runs is fine, because it replaces each file in one step.
 
 **If the data folder is lost**, the relay starts over with an empty one and a new instance ID. Computers notice, then re-create their channels, register their phones again and upload their state. They do this by themselves only if the setup code is unchanged, which means pinned with `TC_SETUP_CODE`. Otherwise the relay makes a new code, and each computer needs it typed in. Either way, phones don't need to pair again, as long as the address stays the same.
 

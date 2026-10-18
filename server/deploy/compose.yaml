@@ -26,7 +26,7 @@ services:
     # TC_TRUST_PROXY: "loopback" under environment.
     # network_mode: host
     volumes:
-      - data:/data
+      - data:/app/server/data
     # Pins the setup code (README, "Setting up computers"). Don't commit your code to git.
     # environment:
     #   TC_SETUP_CODE: "<your setup code>"
@@ -37,5 +37,5 @@ services:
 
 volumes:
   data:
-    # The volume that `docker run -v tcrelay-data:/data` uses, so both ways find the same data.
+    # The volume that `docker run -v tcrelay-data:/app/server/data` uses, so both ways find the same data.
     name: tcrelay-data

@@ -18,19 +18,19 @@ COPY server/package.json server/server.mjs server/
 COPY server/lib/ server/lib/
 COPY parent/ parent/
 
-# The data folder (the setup code and the computers' channels) has to belong to the node user
-# before VOLUME, so that a new volume starts out writable by it. BuildKit's WORKDIR makes a
-# missing folder as the current USER, which saves a RUN step.
+# The data folder, server/data (the setup code and the computers' channels), has to belong to
+# the node user before VOLUME, so that a new volume starts out writable by it. BuildKit's
+# WORKDIR makes a missing folder as the current USER, which saves a RUN step.
 USER node
-WORKDIR /data
+WORKDIR /app/server/data
 WORKDIR /app
-VOLUME /data
+VOLUME /app/server/data
 
 # Requests arrive from Docker's bridge, not loopback: believe Tailscale's X-Forwarded-For from
 # private addresses, so rate limits see each visitor (README, "With Docker").
 ENV HOST=0.0.0.0 \
     PORT=8787 \
-    TC_DATA_DIR=/data \
+    TC_DATA_DIR=/app/server/data \
     TC_TRUST_PROXY=private
 EXPOSE 8787
 
