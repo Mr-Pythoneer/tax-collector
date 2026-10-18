@@ -34,6 +34,39 @@ The app is light by default. **Appearance** in the menu bar menu switches to Dar
 
   Your guardian can turn this off.
 
+## Parents' phones
+
+Parents can follow homework and control the Mac from their phones, through a small relay server the family runs on its own always-on computer (a mini PC). Everything between the Mac and a phone is encrypted, and only a parent's phone can sign a command, so neither the server nor the student can read the messages or fake one.
+
+- **What a phone can do:**
+  - lock the Mac now (until a time or until lifted; homework apps open, or everything closed), unlock it until a time, or go back to the usual rules;
+  - add, edit, delete or excuse tasks, and set up repeating tasks;
+  - approve a specific proof;
+  - block apps (closed whenever they open, locked or not) or allow them during locks;
+  - change the late penalty, turn asking for more time on or off, send the student a message, and remove a lost phone.
+
+  Every action shows on the Mac as a notification naming the phone.
+- **What a phone sees:** tasks and proof results, what's blocked, recent activity, and warnings that something got around Tax Collector:
+  - test mode turned on;
+  - the background agent removed;
+  - the guardian code or the rules edited while the app wasn't running;
+  - time the app wasn't running;
+  - the clock changed;
+  - a forged command.
+
+  Never files, passwords or the guardian code.
+- **Pairing** happens at the Mac, with the guardian code:
+  1. Open Guardian Settings → **Parents' phones** → **Pair a Phone…**. The Mac shows a code.
+  2. The parent opens the server's address on their phone, adds it to the Home Screen, and types the code there.
+  3. Both screens show the same 6-digit number. The guardian code then confirms the match. This way, nobody else's phone can slip in, not even through the server.
+- **While a phone is paired**, a missing guardian code doesn't bring back first-time setup: the Mac says to ask a parent, who can allow a new code from their phone.
+
+Setting up the server: [`server/README.md`](server/README.md). The phone app: [`parent/README.md`](parent/README.md). The protocol: [`docs/parent-link-v1.md`](docs/parent-link-v1.md).
+
+## Windows
+
+[`windows/`](windows/) has Tax Collector for Windows: a tray app in C# on .NET 10, with the same rules, proof checking, a lock that closes apps by checking who made them (not just their file names), and a watchdog that restarts it if it's killed. Its checks pass on the Mac, and it builds for both Windows on ARM and regular PCs. It still needs testing on Windows itself; [`windows/VM-SETUP.md`](windows/VM-SETUP.md) sets up the test VM. Its parent link has the encryption and command checks so far; the network part comes after the VM tests.
+
 ## Install from the disk image
 
 [Download TaxCollector.dmg](https://github.com/Mr-Pythoneer/tax-collector/releases/latest/download/TaxCollector.dmg). That link always gets the newest version; older ones are on the [Releases page](https://github.com/Mr-Pythoneer/tax-collector/releases). It needs a Mac with Apple silicon and macOS 14 or later.
@@ -116,6 +149,8 @@ TAXCOLLECTOR_DATA_DIR=/tmp/tc-test TAXCOLLECTOR_DRY_RUN=1 "build.noindex/Tax Col
 - `TAXCOLLECTOR_ENFORCE_ONLY=com.apple.TextEdit,com.apple.calculator` makes a real lock close only those apps. This lets you test real closing without losing anything else you have open.
 - `TAXCOLLECTOR_SELFTEST=1` runs every feature through the app's own code with a fake Claude and a fake Blackbaud. It writes `selftest.txt` and quits. Always use it with a throwaway `TAXCOLLECTOR_DATA_DIR`.
 - `TAXCOLLECTOR_TEST_SHEET=new|edit|proof|lastcheck|extend|details|guardian|blackbaud|auditor|log|lock`, optionally followed by `:part of a task title`, opens that screen at launch for screenshots.
+- `TAXCOLLECTOR_TEST_QUIET=1` shows nothing at all (no windows, menu bar icon or notifications), for scripted tests.
+- `TAXCOLLECTOR_PARENT_SERVER` and `TAXCOLLECTOR_PARENT_SETUP` link a test copy to a relay. `TAXCOLLECTOR_TEST_PAIR=1` starts pairing and writes the code to `pairing-code.txt`, and `TAXCOLLECTOR_TEST_PAIR_AUTOCONFIRM=1` approves without the guardian code. `scripts/parent-link-e2e.sh` uses them: it runs the relay in `server/`, a quiet test copy and a fake phone (`scripts/fake-phone.mjs`) through every command, a replayed command and a forged signature.
 - `TAXCOLLECTOR_TEST_REPEAT=days:4` (or `weeks:2`) opens New Task with that repeat already filled in.
 - `TAXCOLLECTOR_TEST_SNAPSHOT=/path/to.png` with `TAXCOLLECTOR_TEST_SHEET` draws that screen into a PNG without showing any window or menu bar icon, then quits, so a screen can be checked while someone is using the Mac.
 - `TAXCOLLECTOR_TEST_DETAILS_JSON=/path/to/page.json` makes every assignment's details window show that saved `UserAssignmentDetailsGetAllStudentData` answer instead of asking Blackbaud.
@@ -134,6 +169,7 @@ Everything lives in `~/Library/Application Support/TaxCollector/`:
 - `blackbaud.json`, which holds what the feed last said about each imported assignment and which ones you deleted
 - `blackbaud-session.plist`, which holds your Blackbaud sign-in so it survives restarts. It's readable only by your account, and **Sign out** deletes it.
 - `guardian.json`, which holds only a salted PBKDF2 hash of the code
+- `parent-link.json`, which holds the server's address and setup code, this Mac's keys, and the paired phones. It's readable only by your account. A copy is kept in the app's preferences, so if the file is deleted, it comes back and the phones are told.
 - `proofs/<task>/<submission>/`, which holds your files plus the auditor's raw answer
 - `events.log`
 
@@ -144,6 +180,7 @@ This is self-accountability, not parental-control software.
 - **Before a lock starts**, you could still turn it off: `launchctl bootout`, editing the JSON, or switching it off in System Settings → Login Items.
 - **During a lock**, Terminal, System Settings and text editors are closed, so those routes are blocked.
 - **Activity Monitor:** a plain Quit is refused. Force Quit works, but launchd restarts the app within about 2 seconds.
+- **With parents' phones paired**, these routes don't go unnoticed. The phones see when the app stops reporting, and when it restarts after its files or rules were changed. But someone who controls the server, or rebuilds the app, can still get around it. And it can't block websites: Arc stays open during a lock, and so does everything in it.
 
 ## Blackbaud import
 
