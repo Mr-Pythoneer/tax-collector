@@ -257,3 +257,73 @@ test("fields left out read as null (§8: Swift's encoder omits nils)", () => {
   assert.equal(free.headline, "Unlocked until 10:00 PM", "no by");
   assert.equal(f.statusSummary({ ...s, access: { mode: "normal", at: 0 }, lock: { locked: false, reasons: [] }, tasks: [] }, NOW).headline, "Not locked");
 });
+
+test("freshness ages with time on the phone: an old answer never keeps saying Connected", () => {
+  const t = 1_800_000_000_000;
+  const live = { serverTime: t, computerSeen: t - 2_000, computerAwake: true };
+  // Just answered: connected.
+  assert.equal(f.freshness(live, TZ, f.serverNow(live, 5_000, 5_000)).tone, "ok");
+  // The same answer, read 3 days later (a cached launch, or polls that stopped): not connected.
+  const later = f.freshness(live, TZ, f.serverNow(live, 5_000, 5_000 + 3 * 86_400_000));
+  assert.equal(later.tone, "silent");
+  // "Now" moves on from the server's last answer, not from the phone's own clock.
+  assert.equal(f.serverNow(live, 1_000, 61_000), t + 60_000);
+  assert.equal(f.serverNow(null, 0, 42), 42);
+});
+
+test("dates work in languages that don't write Latin digits", () => {
+  f.setLocale("ar-EG");
+  try {
+    const due = f.wallTime(2026, 10, 20, 8 * 60, TZ);
+    assert.equal(due, at(2026, 10, 20, 8));
+    assert.deepEqual(f.zoned(due, TZ), { y: 2026, m: 10, d: 20, weekday: 3, minute: 480 });
+    assert.equal(f.dayKey(due, TZ), "2026-10-20");
+    assert.equal(f.dayOffset(due, NOW, TZ), 1);
+    assert.equal(f.nextClockTime("21:00", NOW, TZ), at(2026, 10, 19, 21));
+    const sections = f.taskSections([task({ title: "A", due: at(2026, 10, 20, 8) }), task({ title: "B", due: at(2026, 10, 22, 8) })], NOW, TZ);
+    assert.equal(sections.length, 2, "one section per day");
+    assert.equal(sections[0].title, "Tomorrow");
+    assert.match(f.time(due, TZ), /[٠-٩]/, "what's shown is still in the phone's language");
+  } finally {
+    f.setLocale("en-US");
+  }
+});
+
+test("a send whose answer was lost: 'Couldn't confirm it was sent', and the computer's result wins", () => {
+  const dev = "6f1c0e3a-2b4d-4c8e-9a1f-0d2e3c4b5a69";
+  const live = { serverTime: 1000, computerSeen: 1000, computerAwake: true, instance: "A" };
+  const lost = { id: "c9", seq: null, error: "Can't reach the server.", box: "sealed" };
+  const ctx = (extra) => ({ deviceId: dev, state: null, meta: { ackedUpTo: 0 }, live, ...extra });
+  assert.equal(f.phaseLabel(phone.commandPhase(lost, ctx()), live).text, "Couldn't confirm it was sent");
+  assert.ok(!f.isFinal(phone.commandPhase(lost, ctx()).phase), "kept open, so it can still be matched");
+  const state = { results: [{ dev, n: 1, id: "c9", type: "lock", outcome: "applied", reason: "", at: 1 }] };
+  assert.equal(phone.commandPhase(lost, ctx({ state })).phase, "applied");
+  // Without the box there's nothing to resend: an ordinary failure.
+  assert.equal(phone.commandPhase({ ...lost, box: null }, ctx()).phase, "failed");
+  assert.ok(phone.maybeSent({ code: "network" }) && phone.maybeSent({ code: "server", status: 500 }));
+  assert.ok(!phone.maybeSent({ code: "unauthorized", status: 401 }) && !phone.maybeSent({ code: "server", status: 404 }));
+});
+
+test("a command the server took before losing its data is shown as lost, never as delivered", () => {
+  const dev = "6f1c0e3a-2b4d-4c8e-9a1f-0d2e3c4b5a69";
+  const cmd = { id: "c1", seq: 57, instance: "A" };
+  const same = { serverTime: 1, computerSeen: 1, computerAwake: true, instance: "A" };
+  const reset = { ...same, instance: "B" };
+  assert.equal(phone.commandPhase(cmd, { deviceId: dev, meta: { ackedUpTo: 57 }, live: same }).phase, "delivered");
+  const after = phone.commandPhase(cmd, { deviceId: dev, meta: { ackedUpTo: 60 }, live: reset });
+  assert.equal(after.phase, "lost");
+  assert.equal(f.phaseLabel(after, reset).text, "Lost when the server was reset");
+  assert.ok(f.isFinal("lost"));
+});
+
+test("counter catch-up ignores a 'last' that can't be a time", async () => {
+  const counters = new Map([["x", 10]]);
+  const store = { getCounter: async (id) => counters.get(id), setCounter: async (id, n) => counters.set(id, n) };
+  const now = () => 1_800_000_000_000;
+  const computer = { id: "x", deviceId: "d" };
+  assert.equal(await phone.catchUpCounter({ results: [{ dev: "d", reason: "replayed", last: 2 ** 53 + 10 }] }, computer, store, now), false);
+  assert.equal(await phone.catchUpCounter({ results: [{ dev: "d", reason: "replayed", last: now() + 2 * 86_400_000 }] }, computer, store, now), false);
+  assert.equal(counters.get("x"), 10);
+  assert.equal(await phone.catchUpCounter({ results: [{ dev: "d", reason: "replayed", last: now() - 5 }] }, computer, store, now), true);
+  assert.equal(counters.get("x"), now() - 5);
+});

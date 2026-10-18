@@ -1,7 +1,7 @@
 // Network first: the app always asks the server for its files, so it's never out of date, and
 // falls back to the copies kept here when the phone is offline or the server is slow to answer.
 // The relay's API (/v1/) is never cached.
-const CACHE = "tc-parent-1";
+const CACHE = "tc-parent-2";
 
 // Keep in step with FILES in server/lib/static.mjs.
 const PRECACHE = [
@@ -51,9 +51,10 @@ self.addEventListener("fetch", (event) => {
 
 async function networkFirst(request, url) {
   const cache = await caches.open(CACHE);
-  const key = request.mode === "navigate" ? "/" : url.pathname;
+  // Only the app's page is kept as "/": opening /manifest.webmanifest as a page mustn't replace it.
+  const key = request.mode === "navigate" ? (url.pathname === "/" ? "/" : null) : url.pathname;
   const network = fetch(request).then(async (response) => {
-    if (response.ok && response.type === "basic") await cache.put(key, response.clone());
+    if (key && response.ok && response.type === "basic") await cache.put(key, response.clone());
     return response;
   });
   network.catch(() => {}); // answered from the cache instead
@@ -62,10 +63,10 @@ async function networkFirst(request, url) {
   try {
     const first = await Promise.race([network, timeout]);
     if (first) return first;
-    const cached = await cache.match(key);
+    const cached = await cache.match(key ?? url.pathname);
     return cached ?? (await network);
   } catch {
-    const cached = await cache.match(key);
+    const cached = await cache.match(key ?? url.pathname);
     return cached ?? Response.error();
   }
 }

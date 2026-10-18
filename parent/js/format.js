@@ -9,19 +9,23 @@ let LOCALE; // the phone's own; tests set "en-US"
 export const setLocale = (locale) => void (LOCALE = locale);
 
 const formats = new Map();
-function fmt(tz, options) {
-  const key = (LOCALE ?? "") + "|" + (tz ?? "") + "|" + JSON.stringify(options);
+function fmt(tz, options, locale = LOCALE) {
+  const key = (locale ?? "") + "|" + (tz ?? "") + "|" + JSON.stringify(options);
   let f = formats.get(key);
   if (!f) {
     try {
-      f = new Intl.DateTimeFormat(LOCALE, { ...options, timeZone: tz });
+      f = new Intl.DateTimeFormat(locale, { ...options, timeZone: tz });
     } catch {
-      f = new Intl.DateTimeFormat(LOCALE, options);
+      f = new Intl.DateTimeFormat(locale, options);
     }
     formats.set(key, f);
   }
   return f;
 }
+
+// Parts are read back as numbers, so they're always formatted with Latin digits and English
+// names; only what's shown uses the phone's own language (which may write ٢٠٢٦, say).
+const PARSE_LOCALE = "en-US-u-nu-latn";
 
 /** A usable IANA zone, or undefined for the phone's own. */
 export function zoneOf(state) {
@@ -40,7 +44,7 @@ const WEEKDAY = { Sun: 1, Mon: 2, Tue: 3, Wed: 4, Thu: 5, Fri: 6, Sat: 7 };
 /** Calendar parts of `ms` in `tz`: { y, m, d, weekday (1 = Sunday), minute (of the day) }. */
 export function zoned(ms, tz) {
   const parts = {};
-  for (const p of fmt(tz, { year: "numeric", month: "2-digit", day: "2-digit", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(ms)) {
+  for (const p of fmt(tz, { year: "numeric", month: "2-digit", day: "2-digit", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }, PARSE_LOCALE).formatToParts(ms)) {
     parts[p.type] = p.value;
   }
   // formatToParts in the phone's locale may not use English weekday names: work it out from the date.
@@ -283,14 +287,24 @@ export function statusSummary(state, now) {
 }
 
 /**
- * How fresh the news is, from the server's clock only: serverTime − computerSeen.
+ * The server's clock now, as best the phone can tell: its last answer's time plus how long ago
+ * that answer came. Freshness and "now" are judged on it, never on the phone's own clock.
+ */
+export function serverNow(live, receivedAt, phoneNow = Date.now()) {
+  if (live?.serverTime == null || !receivedAt) return live?.serverTime ?? phoneNow;
+  return live.serverTime + Math.max(0, phoneNow - receivedAt);
+}
+
+/**
+ * How fresh the news is, from the server's clock only: (server now) − computerSeen.
+ * `now` is serverNow(...); it defaults to the answer's own time.
  * { tone: "ok" | "asleep" | "late" | "silent" | "unknown", text }.
  */
-export function freshness(live, tz) {
+export function freshness(live, tz, now = live?.serverTime) {
   if (!live || live.serverTime == null || live.computerSeen == null) return { tone: "unknown", text: "Waiting for the computer" };
   if (!live.computerSeen) return { tone: "silent", text: "The computer hasn't connected yet" };
-  const gap = Math.max(0, live.serverTime - live.computerSeen);
-  const at = when(live.computerSeen, live.serverTime, tz);
+  const gap = Math.max(0, now - live.computerSeen);
+  const at = when(live.computerSeen, now, tz);
   if (live.computerAwake === false) return { tone: "asleep", text: `Asleep since ${at}` };
   if (gap < 75_000) return { tone: "ok", text: "Connected" };
   if (gap < 15 * MINUTE) return { tone: "late", text: `Last heard from ${ago(gap)}` };
@@ -363,6 +377,8 @@ export function phaseLabel({ phase, reason }, live) {
   switch (phase) {
     case "sending": return { text: "Sending…", tone: "pending" };
     case "failed": return { text: `Not sent: ${reason || "no connection"}`, tone: "bad" };
+    case "unconfirmed": return { text: "Couldn't confirm it was sent", tone: "pending" };
+    case "lost": return { text: "Lost when the server was reset", tone: "bad" };
     case "waiting": return { text: "Sent", tone: "pending" };
     case "asleep": return { text: live?.computerAwake === false ? "Waiting: computer asleep" : "Waiting: computer offline", tone: "pending" };
     case "delivered": return { text: "Delivered", tone: "pending" };
@@ -374,4 +390,4 @@ export function phaseLabel({ phase, reason }, live) {
   }
 }
 
-export const isFinal = (phase) => ["applied", "noop", "unsupported", "rejected", "failed"].includes(phase);
+export const isFinal = (phase) => ["applied", "noop", "unsupported", "rejected", "failed", "lost"].includes(phase);

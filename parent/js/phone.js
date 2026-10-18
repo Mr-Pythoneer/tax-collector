@@ -36,11 +36,19 @@ export function cleanDeviceName(name) {
   return [...flat].slice(0, DEVICE_NAME_MAX).join("").trim();
 }
 
-/** One call to the relay. Never throws for HTTP errors; throws LinkError("network") if it can't connect. */
-export async function request(origin, method, path, { token, body, headers = {}, signal } = {}) {
+/**
+ * One call to the relay. Never throws for HTTP errors; throws LinkError("network") if it can't
+ * connect or gets no answer within `timeout` ms, and LinkError("aborted") if `signal` stops it.
+ */
+export async function request(origin, method, path, { token, body, headers = {}, signal, timeout = 20_000 } = {}) {
   const h = { ...headers };
   if (token) h.Authorization = "Bearer " + token;
   if (body !== undefined) h["Content-Type"] = "application/json";
+  // AbortSignal.any isn't on every phone yet, so link the caller's signal and a timer by hand.
+  const stop = new AbortController();
+  const onAbort = () => stop.abort();
+  signal?.addEventListener("abort", onAbort, { once: true });
+  const timer = setTimeout(() => stop.abort(), timeout);
   let res;
   try {
     res = await fetch(origin + path, {
@@ -49,11 +57,14 @@ export async function request(origin, method, path, { token, body, headers = {},
       body: body === undefined ? undefined : JSON.stringify(body),
       cache: "no-store",
       credentials: "omit",
-      signal,
+      signal: stop.signal,
     });
   } catch (e) {
     if (signal?.aborted) throw new LinkError("aborted", "Stopped");
-    throw new LinkError("network", "Can't reach the server.", { cause: e });
+    throw new LinkError("network", stop.signal.aborted ? "The server didn't answer in time." : "Can't reach the server.", { cause: e });
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
   }
   let json = null;
   if (res.status !== 204 && res.status !== 304) {
@@ -194,8 +205,9 @@ async function nextPairMessage(origin, slot, pairKey, cursor, deadline, signal, 
   while (now() < deadline) {
     if (signal?.aborted) throw new LinkError("aborted", "Stopped");
     let res;
+    const asked = Date.now();
     try {
-      res = await request(origin, "GET", `/v1/pair/${slot}/toPhone?after=${cursor.after}&wait=25`, { signal });
+      res = await request(origin, "GET", `/v1/pair/${slot}/toPhone?after=${cursor.after}&wait=25`, { signal, timeout: 40_000 });
     } catch (e) {
       if (e.code !== "network" || ++failures > 20) throw e;
       await sleep(Math.min(5000, 500 * failures), signal);
@@ -208,6 +220,8 @@ async function nextPairMessage(origin, slot, pairKey, cursor, deadline, signal, 
       continue;
     }
     if (res.status !== 200) throw httpError(res);
+    // An empty answer that came back at once (not after waiting) shouldn't make us ask again at once.
+    if (!res.json?.messages?.length && Date.now() - asked < 1000) await sleep(1000, signal);
     for (const m of res.json?.messages ?? []) {
       cursor.after = Math.max(cursor.after, m.n);
       let msg;
@@ -253,10 +267,21 @@ export function sendCommand({ computer, store, type, args, now = Date.now, at, n
     const issuedAt = at ?? t;
     const body = lc.commandBody({ channel: computer.channel, deviceId: computer.deviceId, n, at: issuedAt, id, type, args });
     const box = await lc.sealCommand({ linkKey: computer.linkKey, signKey: computer.signKey, channel: computer.channel, deviceId: computer.deviceId, body });
-    const res = await postCommand(computer, box, signal);
-    return { id, n, at: issuedAt, type, args, seq: res.json.seq, receivedAt: res.json.receivedAt, box };
+    let res;
+    try {
+      res = await postCommand(computer, box, signal);
+    } catch (e) {
+      // The relay may have it even so (the answer was lost, or it failed after queueing it): keep
+      // the sealed box, so it can be sent again, which is safe, and matched to its result.
+      Object.assign(e, { box, n, at: issuedAt });
+      throw e;
+    }
+    return { id, n, at: issuedAt, type, args, seq: res.json.seq, receivedAt: res.json.receivedAt, box, instance: res.instance };
   });
 }
+
+/** True when a send failed in a way that may still have reached the relay. */
+export const maybeSent = (e) => e?.code === "network" || (e?.code === "server" && e.status >= 500);
 
 /** Sends a sealed command, trying again on network errors. Resending the same box is safe. */
 export async function postCommand(computer, box, signal) {
@@ -292,6 +317,7 @@ export async function fetchState({ computer, etag, lastSeq = -1, signal }) {
     token: computer.deviceToken,
     headers: etag ? { "If-None-Match": etag } : {},
     signal,
+    timeout: 15_000,
   });
   const live = {
     serverTime: num(res.headers.get("X-TC-Server-Time")),
@@ -329,16 +355,20 @@ export async function fetchState({ computer, etag, lastSeq = -1, signal }) {
  * If this phone's counter is behind it (restored from a backup, say), catch up so the next
  * command isn't refused too. Returns true if the counter moved.
  */
-export async function catchUpCounter(state, computer, store) {
+export async function catchUpCounter(state, computer, store, now = Date.now) {
   let last = 0;
+  const ceiling = now() + 86_400_000; // a counter is a time in ms: anything past tomorrow is nonsense
   for (const r of state?.results ?? []) {
-    if (r?.dev === computer.deviceId && r.reason === "replayed" && Number.isSafeInteger(r.last)) last = Math.max(last, r.last);
+    if (r?.dev === computer.deviceId && r.reason === "replayed" && Number.isSafeInteger(r.last) && r.last <= ceiling) last = Math.max(last, r.last);
   }
   if (!last) return false;
-  const current = (await store.getCounter(computer.id)) ?? 0;
-  if (last <= current) return false;
-  await store.setCounter(computer.id, last);
-  return true;
+  // Under the same lock as sending, so it can't undo a counter a command just saved.
+  return withLock("tc-cmd-" + computer.id, async () => {
+    const current = (await store.getCounter(computer.id)) ?? 0;
+    if (last <= current) return false;
+    await store.setCounter(computer.id, last);
+    return true;
+  });
 }
 
 const RANK = { applied: 4, noop: 3, unsupported: 2, rejected: 1 };
@@ -355,15 +385,19 @@ export function resultFor(state, deviceId, commandId) {
 }
 
 /**
- * Where a sent command is now: "sending", "waiting" (on the server, computer awake),
- * "asleep" (on the server, computer asleep or not heard from), "delivered" (the computer took
- * it), or the computer's outcome: "applied", "noop", "rejected", "unsupported".
+ * Where a sent command is now: "sending", "unconfirmed" (the send failed in a way that may
+ * still have reached the relay), "failed", "waiting" (on the server, computer awake), "asleep"
+ * (on the server, computer asleep or not heard from), "lost" (the server lost its data before
+ * the computer took it), "delivered" (the computer took it), or the computer's outcome:
+ * "applied", "noop", "rejected", "unsupported".
  */
 export function commandPhase(cmd, { state, meta, live, deviceId }) {
   const result = resultFor(state, deviceId, cmd.id);
   if (result) return { phase: result.outcome, reason: result.reason };
   if (cmd.final) return { phase: cmd.final.outcome, reason: cmd.final.reason };
-  if (!cmd.seq) return { phase: cmd.error ? "failed" : "sending", reason: cmd.error ?? "" };
+  if (!cmd.seq) return { phase: cmd.error ? (cmd.box ? "unconfirmed" : "failed") : "sending", reason: cmd.error ?? "" };
+  // Seqs start again on a server that lost its data, so another instance's acks say nothing.
+  if (cmd.instance && live?.instance && live.instance !== cmd.instance) return { phase: "lost", reason: "" };
   if (meta && meta.ackedUpTo >= cmd.seq) return { phase: "delivered", reason: "" };
   const quiet = live?.serverTime != null && live?.computerSeen != null && live.serverTime - live.computerSeen > 90_000;
   if (live?.computerAwake === false || quiet) return { phase: "asleep", reason: "" };

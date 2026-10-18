@@ -47,10 +47,11 @@ Run it:
 
 ```sh
 docker run -d --name tax-collector-relay --restart unless-stopped \
+  --log-opt max-size=10m --log-opt max-file=3 \
   -p 127.0.0.1:8787:8787 -v tcrelay-data:/app/server/data tax-collector-relay
 ```
 
-Or let Docker Compose build and run it in one step. Its file, `server/deploy/compose.yaml`, also makes the container's file system read-only.
+The two `--log-opt` settings keep Docker's copy of the log to 30 MB. Or let Docker Compose build and run it in one step. Its file, `server/deploy/compose.yaml`, does the same and also makes the container's file system read-only.
 
 ```sh
 docker compose -f server/deploy/compose.yaml up -d --build

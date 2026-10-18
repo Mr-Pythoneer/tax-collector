@@ -128,6 +128,10 @@ export function renderForm({ app, view, params }) {
   const time = h("input", { type: "time", value: `${String(Math.floor(z.minute / 60)).padStart(2, "0")}:${String(z.minute % 60).padStart(2, "0")}` });
   const error = h("p", { class: "form-error", attrs: { role: "alert" } });
   const back = editing ? taskHref(view, editing).slice(1) : tasksHref(view).slice(1);
+  // The fields show minutes; a due date from the school calendar may have seconds (11:59:59 PM).
+  // So an unchanged date and time mean "leave the deadline alone", not "set it to this minute".
+  const shownDate = date.value;
+  const shownTime = time.value;
 
   const save = () => {
     const name = title.value.trim();
@@ -144,7 +148,7 @@ export function renderForm({ app, view, params }) {
     const args = { id: editing.id };
     if (name !== editing.title) args.title = name;
     if (details.value.trim() !== (editing.details ?? "").trim()) args.details = details.value.trim();
-    if (dueMs !== editing.due) args.due = dueMs;
+    if ((date.value !== shownDate || time.value !== shownTime) && dueMs !== editing.due) args.due = dueMs;
     if (Object.keys(args).length > 1) app.send(view, "editTask", args);
     app.back(back);
   };

@@ -65,8 +65,11 @@ function newView(rec, cached) {
     etag: null, // fetch the full copy once per launch
     lastSeq: cached?.lastSeq ?? -1,
     fetchedAt: cached?.fetchedAt ?? 0,
+    liveAt: cached?.liveAt ?? cached?.fetchedAt ?? 0, // when (phone time) live.serverTime arrived
+    answered: false, // has the server answered since the app opened?
     instance: cached?.instance ?? rec.instance ?? null,
     problem: null,
+    unauthorizedSince: 0,
     netError: null,
     commands: [],
     lastPoll: 0,
@@ -86,17 +89,30 @@ async function loadComputers() {
 }
 
 async function saveCache(view) {
-  const { state, meta, live, lastSeq, fetchedAt, instance } = view;
-  await db.cache.put({ id: view.rec.id, state, meta, live, lastSeq, fetchedAt, instance }).catch(() => {});
+  const { state, meta, live, lastSeq, fetchedAt, liveAt, instance } = view;
+  await db.cache.put({ id: view.rec.id, state, meta, live, lastSeq, fetchedAt, liveAt, instance }).catch(() => {});
 }
+
+/** The server's clock now, as best this phone can tell. */
+export const serverNowOf = (view) => f.serverNow(view?.live, view?.liveAt);
+
+const FORGET_AFTER = 2 * 60_000;
 
 function problemFor(view, r) {
   const name = view.rec.computerName;
   switch (r.kind) {
-    case "unauthorized":
-      return r.instance && view.instance && r.instance !== view.instance
-        ? { kind: "reset", short: "The server was reset: waiting for the computer", text: `The server was reset. Waiting for ${name} to connect to it again.` }
-        : { kind: "unauthorized", short: "This phone isn't connected any more", text: `This phone isn't connected to ${name} any more. It may have been removed on the computer or from another phone.` };
+    case "unauthorized": {
+      if (r.instance && view.instance && r.instance !== view.instance) {
+        return { kind: "reset", short: "The server was reset: waiting for the computer", text: `The server was reset. Waiting for ${name} to connect to it again.` };
+      }
+      // A server that lost a computer's files (but kept its own) answers 401 until the computer
+      // registers its phones again, so give that a couple of minutes before suggesting Forget.
+      view.unauthorizedSince ||= Date.now();
+      if (Date.now() - view.unauthorizedSince < FORGET_AFTER) {
+        return { kind: "unknown", short: "The server doesn't know this phone right now", text: `The server doesn't know this phone right now. If the server lost its data, ${name} sets this phone up again when it next connects.` };
+      }
+      return { kind: "unauthorized", short: "This phone isn't connected any more", text: `This phone isn't connected to ${name} any more. It may have been removed on the computer or from another phone.` };
+    }
     case "forbidden":
       return { kind: "unauthorized", short: "This phone isn't connected any more", text: "The server says this phone belongs to another computer." };
     case "gone":
@@ -106,7 +122,9 @@ function problemFor(view, r) {
     case "old":
       return { kind: "old", short: "The server sent old news", text: "The server sent older news than this phone has already shown, so the phone ignored it." };
     case "empty":
-      return view.state ? null : { kind: "empty", short: "Waiting for the first update", text: `Waiting for the first update from ${name}.` };
+      return view.state
+        ? { kind: "nocopy", short: "No updates for this phone", text: `${name} isn't sending this phone updates right now. What's shown is from before.` }
+        : { kind: "empty", short: "Waiting for the first update", text: `Waiting for the first update from ${name}.` };
     default:
       return null;
   }
@@ -119,7 +137,12 @@ async function poll(view) {
   try {
     const r = await phone.fetchState({ computer: view.rec, etag: view.etag, lastSeq: view.lastSeq });
     view.netError = null;
-    if (r.live) view.live = { ...view.live, ...r.live };
+    view.answered = true;
+    if (r.live) {
+      view.live = { ...view.live, ...r.live };
+      if (r.live.serverTime != null) view.liveAt = Date.now();
+    }
+    if (r.kind !== "unauthorized") view.unauthorizedSince = 0;
     if (r.kind === "state") {
       Object.assign(view, { state: r.state, etag: r.etag, meta: r.meta, lastSeq: r.state.seq, fetchedAt: Date.now() });
       await phone.catchUpCounter(r.state, view.rec, db.counters).catch(() => {});
@@ -139,13 +162,42 @@ async function poll(view) {
     view.inflight = false;
   }
   await updatePhases(view);
+  if (!view.netError) await resendUnconfirmed(view);
   changed(view);
+}
+
+/**
+ * Sends again the commands whose answer was lost: the same sealed box, so if the first one did
+ * arrive the computer just refuses the copy as replayed. Only within the computer's 10-minute
+ * freshness window; after that the box would be refused as stale anyway.
+ */
+async function resendUnconfirmed(view) {
+  for (const cmd of view.commands) {
+    if (cmd.final || cmd.seq || !cmd.box || cmd.resending) continue;
+    if (Date.now() - (cmd.at ?? cmd.sentAt) > 9 * 60_000) {
+      Object.assign(cmd, { phase: "failed", reason: "no connection for too long", final: { outcome: "failed", reason: "no connection for too long" }, finalAt: Date.now() });
+      await db.commands.put(cmd).catch(() => {});
+      continue;
+    }
+    cmd.resending = true;
+    try {
+      const res = await phone.postCommand(view.rec, cmd.box);
+      Object.assign(cmd, { seq: res.json.seq, receivedAt: res.json.receivedAt, instance: res.instance, error: null, box: null });
+    } catch (e) {
+      if (!phone.maybeSent(e)) Object.assign(cmd, { phase: "failed", reason: e.message, error: e.message, box: null, final: { outcome: "failed", reason: e.message }, finalAt: Date.now() });
+    } finally {
+      cmd.resending = false;
+    }
+    await db.commands.put(cmd).catch(() => {});
+  }
 }
 
 /** Works out where each sent command is, and keeps the final answer once it's seen. */
 async function updatePhases(view) {
   const ctx = { state: view.state, meta: view.meta, live: view.live, deviceId: view.rec.deviceId };
   for (const cmd of view.commands) {
+    // A send that failed may still have reached the computer: its result wins if it shows up.
+    if (cmd.final?.outcome === "failed" && phone.resultFor(view.state, view.rec.deviceId, cmd.id)) cmd.final = null;
     if (cmd.final) continue;
     const { phase, reason } = phone.commandPhase(cmd, ctx);
     if (phase === cmd.phase && reason === cmd.reason) continue;
@@ -160,7 +212,7 @@ async function updatePhases(view) {
 }
 
 function signature(view) {
-  const fr = f.freshness(view.live, f.zoneOf(view.state)).text;
+  const fr = f.freshness(view.live, f.zoneOf(view.state), serverNowOf(view)).text;
   return [view.lastSeq, view.meta?.ackedUpTo, view.meta?.lastCmdSeq, view.live?.computerAwake, fr, view.problem?.kind, view.netError,
     view.commands.slice(0, 8).map((c) => c.phase).join()].join("|");
 }
@@ -196,10 +248,15 @@ async function send(view, type, args) {
   await db.commands.put(cmd).catch(() => {});
   try {
     const sent = await phone.sendCommand({ computer: view.rec, store: db.counters, type, args, id: cmd.id });
-    Object.assign(cmd, { seq: sent.seq, n: sent.n, receivedAt: sent.receivedAt });
+    Object.assign(cmd, { seq: sent.seq, n: sent.n, at: sent.at, receivedAt: sent.receivedAt, instance: sent.instance });
   } catch (e) {
     cmd.error = e.message;
-    Object.assign(cmd, { phase: "failed", reason: e.message, final: { outcome: "failed", reason: e.message }, finalAt: Date.now() });
+    if (phone.maybeSent(e) && e.box) {
+      // Kept, and sent again when the server answers: see resendUnconfirmed.
+      Object.assign(cmd, { phase: "unconfirmed", reason: e.message, box: e.box, n: e.n, at: e.at });
+    } else {
+      Object.assign(cmd, { phase: "failed", reason: e.message, final: { outcome: "failed", reason: e.message }, finalAt: Date.now() });
+    }
     if (e.code === "unauthorized" || e.code === "gone") view.problem = problemFor(view, { kind: e.code, unlinkedAt: e.unlinkedAt });
   }
   await db.commands.put(cmd).catch(() => {});

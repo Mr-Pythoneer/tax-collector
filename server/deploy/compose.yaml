@@ -30,6 +30,12 @@ services:
     # Pins the setup code (README, "Setting up computers"). Don't commit your code to git.
     # environment:
     #   TC_SETUP_CODE: "<your setup code>"
+    # Keep Docker's copy of the log small: three files of 10 MB at most.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # The relay writes nothing outside its data folder.
     read_only: true
     cap_drop: [ALL]

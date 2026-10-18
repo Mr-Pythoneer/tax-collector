@@ -1,7 +1,7 @@
 // Status: one computer at a glance, in plain words, and the way to everything else.
 import { h, screen, group, row } from "../ui.js";
 import * as f from "../format.js";
-import { nowOf, zone, can, problemNotes, commandRows, waiting } from "./common.js";
+import { nowOf, zone, can, problemNotes, commandRows, waiting, freshnessOf } from "./common.js";
 
 export function render({ app, view }) {
   if (!view.state) return { el: waiting(view, view.rec.computerName, app), live: true };
@@ -10,16 +10,8 @@ export function render({ app, view }) {
   const tz = zone(view);
   const id = encodeURIComponent(view.rec.id);
   const summary = f.statusSummary(s, now);
-  // When this phone is cut off or can't reach the server, the last answer's "Connected" would be stale news.
   const cutOff = ["unauthorized", "gone"].includes(view.problem?.kind);
-  const since = view.fetchedAt ? " since " + f.when(view.fetchedAt, Date.now(), undefined) : "";
-  const fresh = cutOff
-    ? { tone: "silent", text: "Not updating" + since }
-    : view.problem?.kind === "reset"
-      ? { tone: "late", text: "Waiting for the computer to connect to the server again" }
-      : view.netError
-        ? { tone: "late", text: "No connection to the server" + since }
-        : f.freshness(view.live, tz);
+  const fresh = freshnessOf(view);
   const pending = (s.tasks ?? []).filter((t) => t.status === "pending");
   const overdue = pending.filter((t) => t.due <= now).length;
   const dueToday = pending.filter((t) => t.due > now && f.dayOffset(t.due, now, tz) === 0).length;
@@ -34,7 +26,8 @@ export function render({ app, view }) {
       h("span", { class: ["dot", "dot-fresh-" + fresh.tone], attrs: { "aria-hidden": "true" } }),
       h("span", { text: fresh.text })));
 
-  const accessValue = s.access?.mode === "locked" ? "Locked by you" : s.access?.mode === "free" ? "Unlocked" : s.lock?.locked ? "Locked" : "Normal";
+  const mine = s.access?.by && s.access.by === view.rec.deviceName;
+  const accessValue = s.access?.mode === "locked" ? (mine ? "Locked by you" : "Locked by a parent") : s.access?.mode === "free" ? "Unlocked" : s.lock?.locked ? "Locked" : "Normal";
   const taskValue = overdue ? `${overdue} overdue` : dueToday ? `${dueToday} due today` : pending.length ? `${pending.length} to do` : "None";
 
   const menu = [

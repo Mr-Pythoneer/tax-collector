@@ -3,10 +3,17 @@ import { h, screen, group, row, buttonRow, spinner, note, confirm } from "../ui.
 import * as f from "../format.js";
 
 /** Now on the server's clock, as best this phone can tell: due times and locks are judged by it. */
-export function nowOf(view) {
-  const live = view?.live;
-  if (!live?.serverTime || !view.fetchedAt) return Date.now();
-  return live.serverTime + Math.max(0, Date.now() - view.fetchedAt);
+export const nowOf = (view) => f.serverNow(view?.live, view?.liveAt);
+
+/** The freshness line, honest about what this phone actually knows right now. */
+export function freshnessOf(view) {
+  const p = view.problem?.kind;
+  const since = view.fetchedAt ? " since " + f.when(view.fetchedAt, Date.now(), undefined) : "";
+  if (p === "unauthorized" || p === "gone") return { tone: "silent", text: "Not updating" + since };
+  if (p === "reset" || p === "unknown") return { tone: "late", text: "Waiting for the computer to connect to the server again" };
+  if (view.netError) return { tone: "late", text: "No connection to the server" + since };
+  if (!view.answered) return { tone: "unknown", text: "Checking…" };
+  return f.freshness(view.live, zone(view), nowOf(view));
 }
 
 export const zone = (view) => f.zoneOf(view?.state);

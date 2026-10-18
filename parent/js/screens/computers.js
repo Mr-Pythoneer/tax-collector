@@ -1,23 +1,22 @@
 // Computers: every computer this phone is paired with, and the way to pair another.
 import { h, screen, group, row, buttonRow } from "../ui.js";
 import * as f from "../format.js";
+import { freshnessOf, nowOf } from "./common.js";
 
 export function toneOf(view, now = Date.now()) {
-  if (view.problem && ["unauthorized", "gone", "unopenable", "reset"].includes(view.problem.kind)) return "warn";
+  if (view.problem && ["unauthorized", "gone", "unopenable", "reset", "unknown"].includes(view.problem.kind)) return "warn";
   if (!view.state) return "gray";
-  const s = f.statusSummary(view.state, view.live?.serverTime ?? now);
+  const s = f.statusSummary(view.state, now);
   return s.tone === "locked" ? "red" : s.tone === "free" ? "orange" : "green";
 }
 
 export function render({ app }) {
   const views = app.views();
   if (!views.length) return { el: welcome(app), live: false };
-  const now = Date.now();
   const rows = views.map((v) => {
-    const tz = f.zoneOf(v.state);
-    const headline = v.problem?.short ?? v.problem?.text ?? (v.state ? f.statusSummary(v.state, v.live?.serverTime ?? now).headline : "Waiting for the first update");
-    const cutOff = ["unauthorized", "gone"].includes(v.problem?.kind);
-    const fresh = cutOff ? "Not updating" : v.netError ? "Can't reach the server" : f.freshness(v.live, tz).text;
+    const now = nowOf(v);
+    const headline = v.problem?.short ?? v.problem?.text ?? (v.state ? f.statusSummary(v.state, now).headline : "Waiting for the first update");
+    const fresh = ["unauthorized", "gone", "reset", "unknown"].includes(v.problem?.kind) ? "Not updating" : v.netError ? "Can't reach the server" : freshnessOf(v).text;
     return row({
       title: v.rec.computerName,
       subtitle: headline,

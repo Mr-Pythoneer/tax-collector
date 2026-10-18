@@ -175,7 +175,7 @@ export class Relay {
   }
 
   #newChannel(id, tokenHash, createdAt) {
-    return { id, tokenHash, createdAt: u.isCount(createdAt) ? createdAt : this.now(), devices: [], seen: 0, awake: false, state: null, commands: [], lastSeq: 0, ackedUpTo: 0, metaDirty: false };
+    return { id, tokenHash, createdAt: u.isCount(createdAt) ? createdAt : this.now(), devices: [], seen: 0, awake: false, asleepAt: 0, state: null, commands: [], lastSeq: 0, ackedUpTo: 0, metaDirty: false };
   }
 
   #index(c) {
@@ -189,27 +189,36 @@ export class Relay {
     for (const d of c.devices) if (this.deviceIndex.get(d.tokenHash)?.ch === c.id) this.deviceIndex.delete(d.tokenHash);
   }
 
+  // Each save writes whatever channel holds that ID when the write happens, and deletes the
+  // file if none does. So a save queued for a channel that was since removed (or removed and
+  // made again) can't bring the old one back or delete the new one's file.
   #saveMeta(c) {
     c.metaDirty = false;
-    return this.store.save(this.#files(c.id).meta, () => {
-      if (this.channels.get(c.id) !== c) return undefined;
-      const { id, tokenHash, createdAt, devices, seen, awake } = c;
+    const id = c.id;
+    return this.store.save(this.#files(id).meta, () => {
+      const cur = this.channels.get(id);
+      if (!cur) return undefined;
+      const { tokenHash, createdAt, devices, seen, awake } = cur;
       return JSON.stringify({ v: 1, id, tokenHash, createdAt, devices, seen, awake });
     });
   }
 
   #saveState(c) {
-    return this.store.save(this.#files(c.id).state, () => {
-      if (this.channels.get(c.id) !== c || !c.state) return undefined;
-      const { seq, updatedAt, copies } = c.state;
+    const id = c.id;
+    return this.store.save(this.#files(id).state, () => {
+      const cur = this.channels.get(id);
+      if (!cur?.state) return undefined;
+      const { seq, updatedAt, copies } = cur.state;
       return JSON.stringify({ v: 1, seq, updatedAt, copies });
     });
   }
 
   #saveCommands(c) {
-    return this.store.save(this.#files(c.id).commands, () => {
-      if (this.channels.get(c.id) !== c) return undefined;
-      return JSON.stringify({ v: 1, lastSeq: c.lastSeq, ackedUpTo: c.ackedUpTo, commands: c.commands });
+    const id = c.id;
+    return this.store.save(this.#files(id).commands, () => {
+      const cur = this.channels.get(id);
+      if (!cur) return undefined;
+      return JSON.stringify({ v: 1, lastSeq: cur.lastSeq, ackedUpTo: cur.ackedUpTo, commands: cur.commands });
     });
   }
 
@@ -290,12 +299,17 @@ export class Relay {
     }, this.limits.requestTimeoutMs);
     let route = "?";
     try {
-      const url = new URL(req.url ?? "/", "http://relay.invalid");
+      let url;
+      try {
+        url = new URL(req.url ?? "/", "http://relay.invalid");
+      } catch {
+        throw new u.HttpError(400, "That isn't a path this server knows how to read");
+      }
       if (url.pathname.startsWith("/v1/")) route = await this.#api(req, res, url);
       else route = this.#serveStatic(req, res, url);
     } catch (e) {
       if (!(e instanceof u.HttpError)) {
-        this.log.error("Request failed: " + (e?.stack ?? e));
+        this.#logUnexpected(e);
         e = new u.HttpError(500, "Something went wrong on the server");
       }
       this.#error(res, e);
@@ -368,7 +382,7 @@ export class Relay {
   async #api(req, res, url) {
     const parts = url.pathname.split("/").slice(2); // after "/v1"
     const m = req.method;
-    const ctx = { req, res, url, ip: clientAddress(req, this.trustProxy), hash: bearerHash(req) };
+    const ctx = { req, res, url, ip: clientAddress(req, this.trustProxy), hash: bearerHash(req), started: this.now() };
     const known = ctx.hash && (this.computerIndex.has(ctx.hash) || this.deviceIndex.has(ctx.hash));
 
     let handler = null;
@@ -484,10 +498,35 @@ export class Relay {
     return { c: this.channels.get(ch), dev: found.dev };
   }
 
+  /** A computer request is starting: the computer is here, and awake (§6.1). */
   #alive(c) {
     c.seen = this.now();
     c.awake = true;
+    c.asleepAt = 0;
     c.metaDirty = true;
+  }
+
+  /**
+   * A waiting request from the computer has ended. It was here until now, unless it said it was
+   * going to sleep while this request was open; either way, "awake" is only changed by requests
+   * starting and by presence.
+   */
+  #touch(c, started) {
+    if (!c || (c.asleepAt && c.asleepAt >= started)) return;
+    c.seen = this.now();
+    c.metaDirty = true;
+  }
+
+  /** Unexpected errors are server bugs; logged, but at most 10 a minute so they can't fill a disk. */
+  #logUnexpected(e) {
+    const now = Date.now();
+    const w = (this.errorWindow ??= { start: now, count: 0, dropped: 0 });
+    if (now - w.start > 60_000) {
+      if (w.dropped) this.log.error(`(${w.dropped} more errors in the last minute weren't logged)`);
+      Object.assign(w, { start: now, count: 0, dropped: 0 });
+    }
+    if (++w.count <= 10) this.log.error("Request failed: " + (e?.stack ?? e));
+    else w.dropped++;
   }
 
   // ---------------------------------------------------------------- endpoints
@@ -500,17 +539,18 @@ export class Relay {
     this.#checkChannelId(ch);
     const body = await this.#body(ctx, 4096);
     if (!ctx.hash) throw new u.HttpError(401, "Send the computer token as a Bearer token");
-    if (typeof body.setupCode !== "string" || !u.sameSecret(u.normaliseCode(body.setupCode), this.setupCode)) {
-      throw new u.HttpError(403, "Wrong setup code");
-    }
     if (!u.isHash(body.tokenHash) || body.tokenHash !== ctx.hash) throw new u.HttpError(400, "tokenHash must be the SHA-256 of the token");
     const existing = this.channels.get(ch);
-    if (existing) {
-      if (!u.sameSecret(existing.tokenHash, ctx.hash)) throw new u.HttpError(409, "This channel belongs to another computer");
+    // Its own computer is told so even if the setup code has changed since.
+    if (existing && u.sameSecret(existing.tokenHash, ctx.hash)) {
       this.#alive(existing);
       this.#send(ctx.res, 200, { ch, created: false });
       return;
     }
+    if (typeof body.setupCode !== "string" || !u.sameSecret(u.normaliseCode(body.setupCode), this.setupCode)) {
+      throw new u.HttpError(403, "Wrong setup code");
+    }
+    if (existing) throw new u.HttpError(409, "This channel belongs to another computer");
     if (this.channels.size >= this.limits.channels) throw new u.HttpError(429, "This server already has as many computers as it allows");
     if (this.computerIndex.has(ctx.hash) || this.deviceIndex.has(ctx.hash)) throw new u.HttpError(409, "That token is in use");
     const c = this.#newChannel(ch, ctx.hash, this.now());
@@ -550,8 +590,9 @@ export class Relay {
   }
 
   async #putDevices(ctx, ch) {
-    const c = this.#asComputer(ctx, ch);
+    this.#asComputer(ctx, ch);
     const body = await this.#body(ctx, 8192);
+    const c = this.#asComputer(ctx, ch); // again: the channel may have gone while the body arrived
     const list = body.devices;
     if (!Array.isArray(list)) throw new u.HttpError(400, '"devices" must be a list');
     if (list.length > this.limits.devicesPerChannel) throw new u.HttpError(400, `At most ${this.limits.devicesPerChannel} phones per computer`);
@@ -579,8 +620,9 @@ export class Relay {
   }
 
   async #putState(ctx, ch) {
-    const c = this.#asComputer(ctx, ch);
+    this.#asComputer(ctx, ch);
     const body = await this.#body(ctx);
+    const c = this.#asComputer(ctx, ch);
     if (!u.isCount(body.seq)) throw new u.HttpError(400, '"seq" must be a whole number');
     if (!body.copies || typeof body.copies !== "object" || Array.isArray(body.copies)) throw new u.HttpError(400, '"copies" must be an object');
     const entries = Object.entries(body.copies);
@@ -601,7 +643,7 @@ export class Relay {
     const { c, dev } = this.#asPhone(ctx, ch);
     const now = this.now();
     // A waiting request for commands is the heartbeat: while one is open, the computer is here now.
-    const computerSeen = this.waiters.count("cmd:" + ch) > 0 ? now : c.seen;
+    const computerSeen = this.waiters.count("cmd:" + ch) > 0 && c.awake ? now : c.seen;
     const live = {
       "X-TC-Server-Time": String(now),
       "X-TC-Computer-Seen": String(computerSeen),
@@ -624,8 +666,9 @@ export class Relay {
   }
 
   async #postCommand(ctx, ch) {
-    const { c, dev } = this.#asPhone(ctx, ch);
+    this.#asPhone(ctx, ch);
     const body = await this.#body(ctx, Math.ceil((this.limits.commandBoxBytes * 4) / 3) + 256);
+    const { c, dev } = this.#asPhone(ctx, ch); // again: the phone may have been removed meanwhile
     u.checkBox(body.box, this.limits.commandBoxBytes, "A command");
     this.#pruneCommands(c);
     if (c.commands.length >= this.limits.commandsPerChannel) throw new u.HttpError(429, "Too many commands are waiting for this computer");
@@ -645,15 +688,19 @@ export class Relay {
     if (c.commands.length === 0 && wait > 0 && !this.closing) {
       if (this.waiters.count(key) >= this.limits.waitingPerChannel) throw new u.HttpError(429, "Too many waiting requests for this computer");
       await this.waiters.wait(key, wait * 1000, ctx.res);
-      if (this.channels.get(ch) !== c) throw new u.HttpError(410, "This computer was unlinked", { unlinkedAt: this.unlinked.get(ch) });
+      if (this.channels.get(ch) !== c) {
+        this.#gone(ch);
+        throw new u.HttpError(404, "No such channel");
+      }
+      this.#touch(c, ctx.started);
     }
-    this.#alive(c);
     this.#send(ctx.res, 200, { serverTime: this.now(), commands: c.commands.map(({ seq, dev, box, receivedAt }) => ({ seq, dev, box, receivedAt })) });
   }
 
   async #ack(ctx, ch) {
-    const c = this.#asComputer(ctx, ch);
+    this.#asComputer(ctx, ch);
     const body = await this.#body(ctx, 1024);
+    const c = this.#asComputer(ctx, ch);
     if (!u.isCount(body.upTo)) throw new u.HttpError(400, '"upTo" must be a whole number');
     const upTo = Math.min(body.upTo, c.lastSeq);
     if (upTo > c.ackedUpTo) {
@@ -665,10 +712,12 @@ export class Relay {
   }
 
   async #presence(ctx, ch) {
-    const c = this.#asComputer(ctx, ch);
+    this.#asComputer(ctx, ch);
     const body = await this.#body(ctx, 1024);
+    const c = this.#asComputer(ctx, ch);
     if (typeof body.awake !== "boolean") throw new u.HttpError(400, '"awake" must be true or false');
     c.awake = body.awake;
+    c.asleepAt = body.awake ? 0 : this.now();
     await this.#saveMeta(c);
     this.#send(ctx.res, 204);
   }
@@ -768,7 +817,9 @@ export class Relay {
     this.#checkSlotId(slot);
     const closed = direction === "toPhone" && !this.slots.has(slot) ? this.#closedSlot(slot) : null;
     if (closed) {
-      this.#send(ctx.res, 200, { messages: closed.toPhone.filter((x) => x.n > after) });
+      const left = closed.toPhone.filter((x) => x.n > after);
+      if (!left.length) throw new u.HttpError(404, "No such pairing code, or it expired");
+      this.#send(ctx.res, 200, { messages: left });
       return;
     }
     const s = direction === "toComputer" ? this.#slotAsComputer(ctx, slot) : this.#slot(ctx, slot, true);
@@ -777,11 +828,11 @@ export class Relay {
     if (fresh().length === 0 && wait > 0 && !this.closing) {
       if (this.waiters.count(key) >= this.limits.waitingPerChannel) throw new u.HttpError(429, "Too many waiting requests for this pairing code");
       await this.waiters.wait(key, wait * 1000, ctx.res);
-      if (this.slots.get(slot) !== s && !(direction === "toPhone" && this.#closedSlot(slot))) {
+      if (this.slots.get(slot) !== s && !(direction === "toPhone" && this.#closedSlot(slot) && fresh().length)) {
         throw new u.HttpError(404, "No such pairing code, or it expired");
       }
     }
-    if (direction === "toComputer") this.#alive(this.channels.get(s.ch));
+    if (direction === "toComputer") this.#touch(this.channels.get(s.ch), ctx.started);
     this.#send(ctx.res, 200, { messages: fresh() });
   }
 }

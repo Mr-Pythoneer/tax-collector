@@ -252,7 +252,7 @@ test("two requests may wait per slot and direction; a third → 429", async (t) 
   assert.deepEqual((await computer).json.messages, [{ n: 1, box: back }]);
 });
 
-test("DELETE /v1/pair/{slot} → 204, for the owning computer only; the computer's waiter gets 404, the phone's the messages so far", async (t) => {
+test("DELETE /v1/pair/{slot} → 204, for the owning computer only; with nothing left to read, both waiters get 404", async (t) => {
   const r = await openRelay(t);
   const a = await setupChannel(r, { devices: 1 });
   const b = await setupChannel(r, { devices: 0 });
@@ -269,9 +269,7 @@ test("DELETE /v1/pair/{slot} → 204, for the owning computer only; the computer
   const del = await deleteSlot(r, slot, a.computer.token);
   assert.equal(del.status, 204);
   assert.equal(del.text, "");
-  const phoneGot = await phoneWaits;
-  assert.equal(phoneGot.status, 200, "a phone waiting for its last message isn't told the code vanished");
-  assert.deepEqual(phoneGot.json, { messages: [] });
+  expectError(await phoneWaits, 404, "not_found"); // nothing came for it, so there's nothing to wait for
   expectError(await computerWaits, 404, "not_found");
   expectError(await getSlot(r, slot), 404, "not_found");
   expectError(await toComputer(r, slot), 404, "not_found");

@@ -97,15 +97,25 @@ test("PUT /v1/channels/{ch}: the setup code is normalised (any case, dashes, spa
   const computer = newToken();
   const put = (setupCode) => call(r.base, "PUT", `/v1/channels/${ch}`, { token: computer.token, body: { setupCode, tokenHash: computer.hash } });
   assert.equal((await put("01ab-cdef-ghjk")).status, 201);
+  // Every spelling of the code makes a channel.
   for (const variant of ["01ABCDEFGHJK", "oL-AbCd-EfGh-Jk", " O i abcd efgh jk ", "0-1-A-B-C-D-E-F-G-H-J-K"]) {
-    assert.equal((await put(variant)).status, 200, variant);
+    const other = channelId();
+    const t2 = newToken();
+    assert.equal((await call(r.base, "PUT", `/v1/channels/${other}`, { token: t2.token, body: { setupCode: variant, tokenHash: t2.hash } })).status, 201, variant);
   }
+  // A wrong code makes nothing.
   for (const wrong of ["01ABCDEFGHJ", "01ABCDEFGHJKM", "01ABCDEFGHJX", "11ABCDEFGHJK", "", 12345, null, ["01ABCDEFGHJK"]]) {
-    expectError(await put(wrong), 403, "forbidden");
+    const t2 = newToken();
+    expectError(await call(r.base, "PUT", `/v1/channels/${channelId()}`, { token: t2.token, body: { setupCode: wrong, tokenHash: t2.hash } }), 403, "forbidden");
   }
-  expectError(await call(r.base, "PUT", `/v1/channels/${ch}`, { token: computer.token, body: { tokenHash: computer.hash } }), 403, "forbidden");
-  // The setup code is checked before tokenHash.
-  expectError(await call(r.base, "PUT", `/v1/channels/${ch}`, { token: computer.token, body: { setupCode: "nope", tokenHash: "x" } }), 403, "forbidden");
+  // The channel's own computer is told "already yours" even with a wrong or missing code, so a
+  // changed setup code doesn't cut off computers that are already linked.
+  assert.equal((await put("01ABCDEFGHJX")).status, 200);
+  assert.equal((await call(r.base, "PUT", `/v1/channels/${ch}`, { token: computer.token, body: { tokenHash: computer.hash } })).status, 200);
+  // Someone else asking for that channel needs the code first: no hint whether it exists.
+  const stranger = newToken();
+  expectError(await call(r.base, "PUT", `/v1/channels/${ch}`, { token: stranger.token, body: { setupCode: "nope", tokenHash: stranger.hash } }), 403, "forbidden");
+  expectError(await call(r.base, "PUT", `/v1/channels/${ch}`, { token: stranger.token, body: { setupCode: "01ABCDEFGHJK", tokenHash: stranger.hash } }), 409, "conflict");
 });
 
 test("PUT /v1/channels/{ch}: tokenHash must be SHA-256 of the bearer token's bytes (400), and a bearer is needed (401)", async (t) => {
