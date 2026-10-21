@@ -311,7 +311,7 @@ public enum StateBuilder {
             var penaltyEnd: Int64?
             if case let .provenLate(_, e) = t.status { penaltyEnd = ms(e) }
             let source: String
-            if t.seriesID != nil { source = "repeat" } else if case .blackbaud = t.source { source = "blackbaud" } else { source = "manual" }
+            if t.seriesID != nil { source = "repeat" } else if t.isFromBlackbaud { source = "blackbaud" } else if t.isFromTeams { source = "teams" } else { source = "manual" }
             return WireState.Task(
                 id: t.id.uuidString.lowercased(), title: clean(parts.title, 200), course: parts.course.map { clean($0, 100) },
                 details: clean(t.details, 500), due: ms(t.dueDate), created: ms(t.createdAt),

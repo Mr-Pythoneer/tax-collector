@@ -1,9 +1,11 @@
 import Foundation
 
-/// Where a task came from: typed in, or imported from a Blackbaud iCal feed (keyed by the event's UID).
+/// Where a task came from: typed in, imported from a Blackbaud iCal feed (keyed by the event's UID),
+/// or imported from Microsoft Teams Assignments (keyed by the assignment's ID).
 public enum TaskSource: Codable, Equatable, Sendable {
     case manual
     case blackbaud(uid: String)
+    case teams(id: String)
 }
 
 public enum Verdict: String, Codable, Equatable, Sendable {
@@ -139,6 +141,14 @@ public struct TaxTask: Codable, Identifiable, Equatable, Sendable {
         return false
     }
 
+    public var isFromTeams: Bool {
+        if case .teams = source { return true }
+        return false
+    }
+
+    /// From a school system, so its title starts with the class ("Mathematics 8: Lesson 4").
+    public var isImported: Bool { isFromBlackbaud || isFromTeams }
+
     /// Paid, but you haven't yet confirmed the checklist and had Blackbaud marked.
     public var needsLastCheck: Bool {
         guard isFromBlackbaud, lastCheckDoneAt == nil else { return false }
@@ -227,6 +237,10 @@ public struct Settings: Codable, Equatable, Sendable {
     public var blackbaudURL: String?
     /// When import was turned on, for the 5-minute grace to undo a mistake.
     public var blackbaudOnSince: Date?
+    /// Whether Microsoft Teams Assignments are imported (you signed in to Teams inside Tax Collector).
+    public var teamsOn: Bool
+    /// When Teams import was turned on, for the 5-minute grace to undo a mistake.
+    public var teamsOnSince: Date?
     /// When an assignment has a date but no time, it's due this many minutes after midnight on that day.
     /// Negative means the evening before.
     public var allDayDueMinutes: Int
@@ -257,6 +271,8 @@ public struct Settings: Codable, Equatable, Sendable {
         guardianLockedUntil = nil
         blackbaudURL = nil
         blackbaudOnSince = nil
+        teamsOn = false
+        teamsOnSince = nil
         allDayDueMinutes = Blackbaud.defaultAllDayDueMinutes
         appearance = "light"
         justSetUp = false
@@ -282,6 +298,8 @@ public struct Settings: Codable, Equatable, Sendable {
         guardianLockedUntil = try c.decodeIfPresent(Date.self, forKey: .guardianLockedUntil)
         blackbaudURL = try c.decodeIfPresent(String.self, forKey: .blackbaudURL)
         blackbaudOnSince = try c.decodeIfPresent(Date.self, forKey: .blackbaudOnSince)
+        teamsOn = try c.decodeIfPresent(Bool.self, forKey: .teamsOn) ?? false
+        teamsOnSince = try c.decodeIfPresent(Date.self, forKey: .teamsOnSince)
         allDayDueMinutes = try c.decodeIfPresent(Int.self, forKey: .allDayDueMinutes) ?? allDayDueMinutes
         appearance = try c.decodeIfPresent(String.self, forKey: .appearance) ?? appearance
         justSetUp = try c.decodeIfPresent(Bool.self, forKey: .justSetUp) ?? false

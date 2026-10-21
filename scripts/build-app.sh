@@ -4,10 +4,18 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# From the macOS 27 SDK on, SwiftUI's @State is a macro whose plugin comes only with Xcode. With just the
+# Command Line Tools, build against the newest macOS 26 SDK instead (the app targets macOS 14 anyway).
+CLT=/Library/Developer/CommandLineTools
+if [ -z "${SDKROOT:-}" ] && [ "$(xcode-select -p)" = "$CLT" ] && [ ! -e "$CLT/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib" ]; then
+    SDK26="$(ls -d "$CLT"/SDKs/MacOSX26.*.sdk 2>/dev/null | sort -V | tail -1)"
+    [ -n "$SDK26" ] && export SDKROOT="$SDK26"
+fi
+
 swift build -c release --arch arm64
 BIN="$(swift build -c release --arch arm64 --show-bin-path)/TaxCollector"
 APP="build.noindex/Tax Collector.app"
-VERSION="0.6.0"
+VERSION="0.7.0"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -26,7 +34,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
-    <key>CFBundleVersion</key><string>9</string>
+    <key>CFBundleVersion</key><string>10</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>

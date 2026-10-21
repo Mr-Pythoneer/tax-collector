@@ -10,8 +10,8 @@ A Mac menu-bar app that holds you to your own deadlines. Add a task and a due da
 
 The main window lists what's due, soonest first, grouped by day (Overdue, Today, Tomorrow, then each date), like the Scheduled list in Reminders.
 
-- **Classes:** Blackbaud assignments show their class under the title, with a coloured dot. Each class keeps its colour.
-- **Notices:** problems show at the top of the list: the lock, a guardian unlock, proof checking not working, or Blackbaud import failing.
+- **Classes:** Blackbaud and Teams assignments show their class under the title, with a coloured dot. Each class keeps its colour.
+- **Notices:** problems show at the top of the list: the lock, a guardian unlock, proof checking not working, or Blackbaud or Teams import failing.
 - **Below the list:** paid Blackbaud work waiting for its last check comes after the days. Finished tasks fold into **Completed**.
 - **Repeating tasks:** in **New Task**, turn on **Repeats**. Choose **every N days** (1 is every day, 4 is every 4 days) or **every N weeks** on the days you pick (every week on Monday, every 2 weeks on Monday and Wednesday), plus the time and the day it starts. One copy is out at a time. The next appears once that copy's deadline has passed, even if you paid early, and a copy that's due needs its own proof like any task. If the Mac was off for weeks, only the next copy appears, not a pile of missed ones. **Stop Repeating** (in the **Repeating** section, or a copy's right-click menu) ends it; the copy that's out stays.
 - **Details:** click a task (or right-click → **Show Details…**) to open it in its own window: what to do, the teacher's files and links for Blackbaud assignments, and your proof so far. It can stay open next to your work.
@@ -124,7 +124,7 @@ Command Line Tools are enough; Xcode isn't needed.
 ```bash
 ./scripts/install.sh      # builds arm64, copies to ~/Applications, starts at login (LaunchAgent, KeepAlive)
 ./scripts/uninstall.sh    # add --purge to delete tasks and proofs too
-swift run taxcore-check   # logic checks (lock rule, edit window, clock guard, guardian hash, auditor parsing, iCal parser, Blackbaud sync)
+swift run taxcore-check   # logic checks (lock rule, edit window, clock guard, guardian hash, auditor parsing, iCal parser, Blackbaud and Teams sync)
 ```
 
 To try the install without touching the real one, set `TAXCOLLECTOR_LABEL` and `TAXCOLLECTOR_DEST` for `install.sh` and `uninstall.sh`. Other `TAXCOLLECTOR_*` variables are passed to the installed copy.
@@ -147,7 +147,7 @@ TAXCOLLECTOR_DATA_DIR=/tmp/tc-test TAXCOLLECTOR_DRY_RUN=1 "build.noindex/Tax Col
 - `TAXCOLLECTOR_DATA_DIR` uses separate data and skips the single-instance check.
 - `TAXCOLLECTOR_DRY_RUN=1` logs which apps would be closed instead of closing them, and lets you quit normally. So does `TAXCOLLECTOR_ALLOW_QUIT=1`.
 - `TAXCOLLECTOR_ENFORCE_ONLY=com.apple.TextEdit,com.apple.calculator` makes a real lock close only those apps. This lets you test real closing without losing anything else you have open.
-- `TAXCOLLECTOR_SELFTEST=1` runs every feature through the app's own code with a fake Claude and a fake Blackbaud. It writes `selftest.txt` and quits. Always use it with a throwaway `TAXCOLLECTOR_DATA_DIR`.
+- `TAXCOLLECTOR_SELFTEST=1` runs every feature through the app's own code with a fake Claude, a fake Blackbaud and a fake Teams. It writes `selftest.txt` and quits. Always use it with a throwaway `TAXCOLLECTOR_DATA_DIR`.
 - `TAXCOLLECTOR_TEST_SHEET=new|edit|proof|lastcheck|extend|details|guardian|blackbaud|auditor|log|lock`, optionally followed by `:part of a task title`, opens that screen at launch for screenshots.
 - `TAXCOLLECTOR_TEST_QUIET=1` shows nothing at all (no windows, menu bar icon or notifications), for scripted tests.
 - `TAXCOLLECTOR_PARENT_SERVER` and `TAXCOLLECTOR_PARENT_SETUP` link a test copy to a relay. `TAXCOLLECTOR_TEST_PAIR=1` starts pairing and writes the code to `pairing-code.txt`, and `TAXCOLLECTOR_TEST_PAIR_AUTOCONFIRM=1` approves without the guardian code. `scripts/parent-link-e2e.sh` uses them: it runs the relay in `server/`, a quiet test copy and a fake phone (`scripts/fake-phone.mjs`) through every command, a replayed command and a forged signature.
@@ -156,9 +156,29 @@ TAXCOLLECTOR_DATA_DIR=/tmp/tc-test TAXCOLLECTOR_DRY_RUN=1 "build.noindex/Tax Col
 - `TAXCOLLECTOR_TEST_DETAILS_JSON=/path/to/page.json` makes every assignment's details window show that saved `UserAssignmentDetailsGetAllStudentData` answer instead of asking Blackbaud.
 - `TAXCOLLECTOR_TEST_GUARDIAN_CODE` types a guardian code into the code box. It still has to be the right code.
 - Setup is never run in a test like this unless you add `TAXCOLLECTOR_TEST_SETUP=1`. With it, `TAXCOLLECTOR_TEST_APPLICATIONS_DIR` stands in for the Applications folder, and `TAXCOLLECTOR_LABEL` names the background copy. Launching with `--finish-setup` acts like clicking Finish Setup.
+- `TAXCOLLECTOR_TEAMS_PROBE=1` signs in to Teams if needed (a window opens), then writes `teams-probe.json`: how many assignments Teams lists as owed and which would become tasks. It imports nothing. It also writes `teams-debug.json` (where each page is, with no addresses beyond host and path and nothing from its content) while it waits. Start it with `open -n --env …` so its windows can come to the front.
+- `TAXCOLLECTOR_TEST_TEAMS_JSON=/path/to/work.json` makes Teams import read a saved `/edu/me/work` answer instead of signing in.
 - `TAXCOLLECTOR_BLACKBAUD_PROBE=1` opens the Blackbaud sign-in if needed, then writes `blackbaud-probe.json`: a read-only report of what Blackbaud's endpoints return, which assignment each imported task matches, and what one assignment's page holds (counts only). It saves only the fields the app uses, never cookies or tokens. Run this first when Blackbaud changes something.
 - `TAXCOLLECTOR_TEST_LAST_CHECK=<part of a title>` opens that paid task's last check, ticks everything and confirms it, just as your clicks would. **This really marks the assignment Completed in Blackbaud.**
 - To test Blackbaud import without a real feed, put `"blackbaudURL": "file:///path/to/sample.ics"` in that folder's `settings.json`. The app polls it at launch.
+
+## Teams import
+
+Tax Collector can import your Microsoft Teams assignments (the Assignments app) as tasks, alongside or instead of Blackbaud. Open **Tax Collector → Teams** (or the person-group button in the toolbar) and click **Sign In and Turn On Import**. A window opens with Microsoft's own sign-in for your school account; tick **Stay signed in** so you don't need to do it again. Tax Collector never sees your password. The window closes by itself once it works.
+
+**How it reads Teams.** There's no official way for a student to do this: Microsoft's assignments API needs a school administrator's consent. So Tax Collector does what you do in a browser. It opens the Teams web app in a hidden window, lets Teams open its Assignments app, and asks that app's own server for your list, with the sign-in the app already has. It only ever *reads*: it never hands anything in, marks anything done or changes anything in Teams. The sign-in token stays inside the page; Tax Collector only receives the answers.
+
+**How it imports**
+
+- Teams is checked every 30 minutes (and again after 5 minutes if a check failed), or when you click **Sync Now**. The check takes about 15 seconds.
+- An assignment becomes a task if it's still assigned, not handed in or returned, not excused, and due from now on. Its title is `Class: Assignment`, so the class shows and gets its colour like a Blackbaud one. The teacher's instructions are the task's description, and **Open in Teams** is in its details window.
+- A task is matched by Teams' own assignment ID, so a re-check never makes duplicates, and a deleted one isn't imported again.
+- A teacher's change follows the same lock-in rule as for Blackbaud: anything before the task is locked in, only an earlier deadline after, and never a deadline in the past.
+- Work that drops off the list (you handed it in on Teams, or the teacher removed it) stays as a task. Handing in on Teams doesn't finish the task here: you still submit proof to Tax Collector.
+- Turning import on never needs the guardian. Turning it off does while anything it imported is due within 24 hours (or later, with 5 minutes' grace after turning it on).
+- If the Microsoft sign-in lapses, a notice at the top says so, and **Sign In Again** brings the window back.
+
+**Fragile on purpose.** This relies on how Microsoft's web apps work today (the Assignments app's address, its sign-in audience and the Assignments button in Teams). If Microsoft changes any of them, import stops with an error rather than guessing. The parts to fix are kept together in `Sources/TaxCore/Teams.swift` (addresses and reading) and `Sources/TaxCollector/TeamsLink.swift` (the page).
 
 ## Data
 
@@ -168,6 +188,8 @@ Everything lives in `~/Library/Application Support/TaxCollector/`:
 - `recurring.json`, which holds your repeating tasks and when each one's current copy is due
 - `blackbaud.json`, which holds what the feed last said about each imported assignment and which ones you deleted
 - `blackbaud-session.plist`, which holds your Blackbaud sign-in so it survives restarts. It's readable only by your account, and **Sign out** deletes it.
+- `teams.json`, which holds what Teams last said about each imported assignment and which ones you deleted
+- `teams-session.plist`, which holds your Microsoft sign-in cookies so Teams import survives restarts. It's readable only by your account, and **Sign Out of Teams** deletes it.
 - `guardian.json`, which holds only a salted PBKDF2 hash of the code
 - `parent-link.json`, which holds the server's address and setup code, this Mac's keys, and the paired phones. It's readable only by your account. A copy is kept in the app's preferences, so if the file is deleted, it comes back and the phones are told.
 - `proofs/<task>/<submission>/`, which holds your files plus the auditor's raw answer

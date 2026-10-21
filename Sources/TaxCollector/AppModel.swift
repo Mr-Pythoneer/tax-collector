@@ -55,6 +55,12 @@ final class AppModel {
     var feedSyncing = false
     var feedError: String?
     var blackbaudSignedIn = false
+    var teams: TeamsState
+    var teamsSyncing = false
+    var teamsError: String?
+    var teamsSignedIn = false
+    /// You asked to turn Teams import on; it starts once you've signed in.
+    var teamsWanted = false
     var setupNeed: SetupNeed?
     var details: [UUID: DetailsState] = [:]
     /// Attachments being downloaded, by attachment id.
@@ -92,6 +98,14 @@ final class AppModel {
     /// Marks an assignment Completed in Blackbaud. Returns nil on success, or why it failed.
     @ObservationIgnored var blackbaudMarker: (TaxTask) async -> String? = { _ in "Blackbaud isn't connected." }
     @ObservationIgnored var allowQuit = false
+    /// Opens the Microsoft Teams sign-in window.
+    @ObservationIgnored var onTeamsSignIn: () -> Void = {}
+    @ObservationIgnored var onTeamsSignOut: () -> Void = {}
+    /// Reads what's still owed in Teams, due from the given time on.
+    @ObservationIgnored var teamsFetcher: (Date) async -> Result<[TeamsAssignment], TeamsLink.Failure> = { _ in
+        .failure(.init(message: "Teams isn't connected."))
+    }
+    @ObservationIgnored var lastTeamsAttempt: Date?
 
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var warned: [UUID: Set<Int>] = [:]
@@ -110,6 +124,7 @@ final class AppModel {
         settings = store.loadSettings()
         guardian = store.loadGuardian()
         blackbaud = store.loadBlackbaud()
+        teams = store.loadTeams()
         recurring = store.loadRecurring()
         enforcer = Enforcer(dryRun: dryRun)
         now = LockPolicy.effectiveNow(systemNow: Date(), lastSeen: settings.lastSeen)
@@ -198,6 +213,7 @@ final class AppModel {
         updateEnforcer()
         checkWarnings()
         pollFeedIfDue()
+        pollTeamsIfDue()
     }
 
     private func lockChanged() {
@@ -328,6 +344,10 @@ final class AppModel {
         if !guardianApproved && !LockPolicy.canDeleteWithoutGuardian(t, now: now) { return .needsGuardian }
         tasks.removeAll { $0.id == id }
         try? FileManager.default.removeItem(at: store.proofsRoot.appendingPathComponent(id.uuidString))
+        if case let .teams(id) = t.source {
+            teams.dismiss(id: id)
+            store.saveTeams(teams)
+        }
         if case let .blackbaud(uid) = t.source {
             blackbaud.dismiss(uid: uid, title: t.title, due: t.dueDate)
             store.saveBlackbaud(blackbaud)

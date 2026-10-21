@@ -21,6 +21,7 @@ public final class Store {
     private var guardianURL: URL { dir.appendingPathComponent("guardian.json") }
     private var blackbaudURL: URL { dir.appendingPathComponent("blackbaud.json") }
     private var recurringURL: URL { dir.appendingPathComponent("recurring.json") }
+    private var teamsURL: URL { dir.appendingPathComponent("teams.json") }
     public var linkURL: URL { dir.appendingPathComponent("parent-link.json") }
     public var logURL: URL { dir.appendingPathComponent("events.log") }
     public var proofsRoot: URL { dir.appendingPathComponent("proofs", isDirectory: true) }
@@ -36,6 +37,9 @@ public final class Store {
 
     public func loadBlackbaud() -> BlackbaudState { load(BlackbaudState.self, from: blackbaudURL) ?? BlackbaudState() }
     public func saveBlackbaud(_ state: BlackbaudState) { save(state, to: blackbaudURL) }
+
+    public func loadTeams() -> TeamsState { load(TeamsState.self, from: teamsURL) ?? TeamsState() }
+    public func saveTeams(_ state: TeamsState) { save(state, to: teamsURL) }
 
     public func loadRecurring() -> [RecurringTask] { load([RecurringTask].self, from: recurringURL) ?? [] }
     public func saveRecurring(_ series: [RecurringTask]) { save(series, to: recurringURL) }

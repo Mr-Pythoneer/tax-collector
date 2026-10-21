@@ -283,6 +283,31 @@ enum SelfTest {
             check("feed: a deleted assignment isn't imported again", !model.tasks.contains { $0.source == .blackbaud(uid: "selftest-reading") })
         }
 
+        // Teams import, with a pretend Teams
+        let teamsLab = TeamsAssignment(id: "selftest-teams-lab", classID: "c", title: "Science 8: Lab", details: "Write it up.",
+                                       dueDate: Date().addingTimeInterval(3 * 86400), link: "https://teams.microsoft.com/l/x")
+        let teamsOld = TeamsAssignment(id: "selftest-teams-old", title: "Old", dueDate: Date().addingTimeInterval(-86400))
+        model.teamsFetcher = { _ in .success([teamsLab, teamsOld]) }
+        model.teamsSignInChanged(true)
+        check("teams: signing in alone doesn't turn import on", !model.teamsIsOn)
+        model.turnOnTeams()
+        _ = await wait { !model.teamsSyncing && model.tasks.contains { $0.source == .teams(id: teamsLab.id) } }
+        let fromTeams = model.tasks.first { $0.source == .teams(id: teamsLab.id) }
+        check("teams: upcoming assignments are imported", model.teamsIsOn && fromTeams?.title == "Science 8: Lab")
+        check("teams: past assignments are skipped", !model.tasks.contains { $0.source == .teams(id: teamsOld.id) })
+        check("teams: the task links back to Teams", fromTeams.flatMap { model.teams.link(of: $0) } != nil)
+        if let fromTeams {
+            check("teams: an imported task days away can be deleted", model.delete(fromTeams.id) == .saved)
+            model.syncTeams()
+            _ = await wait(5) { !model.teamsSyncing }
+            check("teams: a deleted assignment isn't imported again", !model.tasks.contains { $0.source == .teams(id: teamsLab.id) })
+        }
+        model.teamsFetcher = { _ in .failure(.init(message: "Signed out of Microsoft Teams.", signedOut: true)) }
+        model.syncTeams()
+        _ = await wait(5) { !model.teamsSyncing }
+        check("teams: a lapsed sign-in shows as an error", model.teamsError != nil && !model.teamsSignedIn)
+        check("teams: can be turned off in the first minutes", model.stopTeams() == .saved && !model.teamsIsOn)
+
         // Last check, with a pretend Blackbaud
         if let lab {
             var marked: [String] = []

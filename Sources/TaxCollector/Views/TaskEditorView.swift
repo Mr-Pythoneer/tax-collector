@@ -44,9 +44,9 @@ struct TaskEditorView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text(editing == nil ? "New Task" : "Edit Task").font(.title2.bold())
 
-            if case .blackbaud = original?.source {
-                Label("Imported from Blackbaud. Your changes stay unless the teacher changes this assignment.",
-                      systemImage: "graduationcap")
+            if let original, original.isImported {
+                Label("Imported from \(original.isFromTeams ? "Teams" : "Blackbaud"). Your changes stay unless the teacher changes this assignment.",
+                      systemImage: original.isFromTeams ? "person.3" : "graduationcap")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

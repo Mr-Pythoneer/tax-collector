@@ -7,6 +7,7 @@ import UserNotifications
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate {
     private var model: AppModel!
     private let blackbaudLink = BlackbaudLink()
+    private let teamsLink = TeamsLink()
     private let router = Router()
     private var statusItem: NSStatusItem!
     private var mainWindow: NSWindow?
@@ -93,6 +94,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                 self?.model.retrySignedOutDetails()
             }
         }
+        teamsLink.sessionFile = model.store.dir.appendingPathComponent("teams-session.plist")
+        teamsLink.onSignedInChange = { [weak self] signedIn in self?.model.teamsSignInChanged(signedIn) }
+        model.onTeamsSignIn = { [weak self] in self?.teamsLink.showSignIn() }
+        model.onTeamsSignOut = { [weak self] in
+            guard let self else { return }
+            Task { await self.teamsLink.signOut() }
+        }
+        model.teamsFetcher = { [weak self] now in
+            guard let self else { return .failure(.init(message: "Tax Collector is shutting down.")) }
+            // Testing aid: read a saved work list (the JSON Teams sends) instead of signing in.
+            if let sample = env["TAXCOLLECTOR_TEST_TEAMS_JSON"], !sample.isEmpty {
+                guard let data = FileManager.default.contents(atPath: sample), let page = Teams.parseWork(data) else {
+                    return .failure(.init(message: "The test Teams file can't be read."))
+                }
+                return .success(Teams.assignments(from: page.items, classes: ["selftest-class": "Science 8 - SNC8 - 8D"]))
+            }
+            return await self.teamsLink.upcoming(now: now)
+        }
+        // Testing aid: TAXCOLLECTOR_TEAMS_PROBE=1 opens the sign-in (if needed) and writes what Teams would import,
+        // without importing anything.
+        if env["TAXCOLLECTOR_TEAMS_PROBE"] == "1" {
+            Task { await self.runTeamsProbe() }
+        }
         model.onFinishSetup = { [weak self] in self?.finishSetup() }
         model.onOpenDetails = { [weak self] in self?.openDetails($0) }
         model.blackbaudDetails = { [weak self] task in
@@ -144,7 +168,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         }
         model.onImported = { [weak self] added in
             guard let self, let next = added.min(by: { $0.dueDate < $1.dueDate }) else { return }
-            let title = added.count == 1 ? "New from Blackbaud: \(next.title)" : "\(added.count) assignments from Blackbaud"
+            let from = added.allSatisfy(\.isFromTeams) ? "Teams" : "Blackbaud"
+            let title = added.count == 1 ? "New from \(from): \(Agenda.courseAndTitle(next).title)" : "\(added.count) assignments from \(from)"
             var body = "Next: \(Agenda.courseAndTitle(next).title), due \(Fmt.relative(next.dueDate, now: self.model.now))."
             if next.dueDate.timeIntervalSince(self.model.now) <= LockPolicy.freezeWindow {
                 body += " Due within a day, so it locks in after 5 minutes."
@@ -202,6 +227,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     }
 
     // MARK: Setup
+
+    /// Writes what Teams import would add to `teams-probe.json` in the data folder. Imports nothing.
+    private func runTeamsProbe() async {
+        let out = model.store.dir.appendingPathComponent("teams-probe.json")
+        func write(_ value: [String: Any]) {
+            if let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]) {
+                try? data.write(to: out)
+            }
+            model.store.log("PROBE wrote teams-probe.json")
+        }
+        let watch = Task { [weak self] in
+            let debug = out.deletingLastPathComponent().appendingPathComponent("teams-debug.json")
+            while !Task.isCancelled {
+                guard let self else { return }
+                let snap = await self.teamsLink.debugSnapshot()
+                if !snap.isEmpty, let data = try? JSONSerialization.data(withJSONObject: snap, options: [.prettyPrinted, .sortedKeys]) {
+                    try? data.write(to: debug)
+                }
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+            }
+        }
+        defer { watch.cancel() }
+        for attempt in 0..<2 {
+            switch await teamsLink.upcoming(now: model.now) {
+            case let .success(items):
+                let result = Teams.sync(tasks: model.tasks, state: model.teams, assignments: items, now: model.now)
+                let iso = ISO8601DateFormatter()
+                write(["owed": items.count,
+                       "wouldAdd": result.added.map { ["title": $0.title, "due": iso.string(from: $0.dueDate),
+                                                      "details": String($0.details.prefix(300))] },
+                       "links": items.filter { $0.link != nil }.count])
+                return
+            case let .failure(failure):
+                guard failure.signedOut, attempt == 0 else {
+                    return write(["error": failure.message, "stuckHost": teamsLink.lastStuckHost ?? "none",
+                                  "navigationError": teamsLink.lastNavigationError ?? "none"])
+                }
+                teamsLink.showSignIn()
+                for _ in 0..<300 where !model.teamsSignedIn {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                }
+            }
+        }
+    }
 
     private func refreshSetupNeed() {
         if !setupAllowed || BackgroundAgent.isInstalled {
@@ -343,6 +412,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         case "log": .log
         case "auditor": .auditor
         case "blackbaud": .blackbaud
+        case "teams": .teams
         default: nil
         }
         return (parts[0], sheet, task)
@@ -566,6 +636,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         menu.addItem(item("New Task…", #selector(menuNewTask), key: "n"))
         menu.addItem(.separator())
         menu.addItem(item("Blackbaud…", #selector(menuBlackbaud)))
+        menu.addItem(item("Teams…", #selector(menuTeams)))
         menu.addItem(item("Guardian…", #selector(menuGuardian)))
         menu.addItem(item("Activity Log…", #selector(menuLog)))
         let appearance = NSMenuItem(title: "Appearance", action: nil, keyEquivalent: "")
@@ -619,6 +690,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     @objc private func menuBlackbaud() {
         showMain()
         router.mainSheet = .blackbaud
+    }
+    @objc private func menuTeams() {
+        showMain()
+        router.mainSheet = .teams
     }
     @objc private func menuLog() {
         showMain()

@@ -1298,6 +1298,171 @@ struct AssignmentPage {
     }
 }
 
+struct TeamsImport {
+    /// Shaped like one page of `/api/v1.0/edu/me/work` (made-up classes and assignments).
+    private let page = """
+    {"@odata.context": "x", "@odata.nextLink": "https://assignments.edu.cloud.microsoft/api/v1.0/edu/me/work?$skiptoken=abc",
+     "value": [
+      {"id": "a-1", "classId": "c-1", "displayName": "Lab &amp; report", "dueDateTime": "2027-01-15T20:00:00Z",
+       "status": "assigned", "isCompleted": false, "webUrl": "https://teams.microsoft.com/l/entity/x",
+       "instructions": null, "submissions": [{"status": "working", "excusedDateTime": null}]},
+      {"id": "a-2", "classId": "c-2", "displayName": "Handed in", "dueDateTime": "2027-01-16T20:00:00.000Z",
+       "status": "assigned", "isCompleted": false, "submissions": [{"status": "submitted"}]},
+      {"id": "a-3", "classId": "c-1", "displayName": "Excused", "dueDateTime": "2027-01-17T20:00:00Z",
+       "status": "assigned", "isCompleted": false, "submissions": [{"status": "working", "excusedDateTime": "2027-01-01T00:00:00Z"}]},
+      {"id": "a-4", "classId": "c-1", "displayName": "Draft", "dueDateTime": "2027-01-18T20:00:00Z",
+       "status": "draft", "isCompleted": false, "submissions": []},
+      {"id": "a-5", "classId": "c-1", "displayName": "No due date", "status": "assigned", "isCompleted": false},
+      {"id": "a-6", "classId": "c-2", "displayName": "Returned", "dueDateTime": "2027-01-19T20:00:00Z",
+       "status": "assigned", "isCompleted": false, "submissions": [{"status": "returned"}]},
+      {"id": "a-7", "classId": "c-9", "displayName": "Reflection", "dueDateTime": "2027-01-20T03:59:00Z",
+       "status": "assigned", "isCompleted": false, "submissions": [{"status": "reassigned"}]},
+      {"id": "a-1", "classId": "c-1", "displayName": "Lab &amp; report", "dueDateTime": "2027-01-15T20:00:00Z",
+       "status": "assigned", "isCompleted": false, "submissions": [{"status": "working"}]},
+      {"classId": "c-1", "displayName": "No id"}
+     ]}
+    """
+    private let classes = """
+    {"value": [{"id": "c-1", "name": "Science 8 - SNC8 - 8D"}, {"id": "c-2", "displayName": "French 8 - FSF8 - 8D"}]}
+    """
+
+    func readsAPage() {
+        guard let parsed = Teams.parseWork(Data(page.utf8)) else { return expect(false) }
+        expect(parsed.items.count == 8)
+        expect(parsed.next?.contains("skiptoken") == true)
+        expect(parsed.items.first?.submission == "working")
+        expect(parsed.items.first?.due == Date(timeIntervalSince1970: 1_800_043_200))
+        expect(parsed.items[1].due != nil)
+        expect(Teams.parseWork(Data("{}".utf8)) == nil)
+        expect(Teams.parseWork(Data("not json".utf8)) == nil)
+        let names = Teams.parseClasses(Data(classes.utf8))
+        expect(names["c-1"] == "Science 8 - SNC8 - 8D" && names["c-2"] == "French 8 - FSF8 - 8D")
+    }
+
+    func onlyOwedWorkBecomesAssignments() {
+        guard let parsed = Teams.parseWork(Data(page.utf8)) else { return expect(false) }
+        let names = Teams.parseClasses(Data(classes.utf8))
+        let items = Teams.assignments(from: parsed.items, classes: names,
+                                      instructions: ["a-1": "<p>Read <b>pages</b> 4&ndash;5</p><p>Then answer</p>"])
+        expect(items.map(\.id) == ["a-1", "a-7"])
+        expect(items.first?.title == "Science 8: Lab & report")
+        expect(items.first?.details.hasPrefix("Read pages 4") == true)
+        expect(items.first?.details.contains("\nThen answer") == true)
+        let styled = Teams.assignments(from: parsed.items, classes: names,
+                                       instructions: ["a-1": "<html><head><style>.c0{display:inline!important}</style></head><body><div><span class=\"c0\">Read it</span></div></body></html>"])
+        expect(styled.first?.details == "Read it")
+        expect(items.first?.link == "https://teams.microsoft.com/l/entity/x")
+        // A class Tax Collector couldn't name: just the assignment.
+        expect(items.last?.title == "Reflection")
+        // The class shows like Blackbaud's.
+        let t = TaxTask(title: items[0].title, dueDate: items[0].dueDate, createdAt: t0, source: .teams(id: "a-1"))
+        expect(Agenda.courseAndTitle(t).course == "Science 8")
+        expect(Agenda.courseAndTitle(t).title == "Lab & report")
+        expect(Teams.shortClassName("Mathematics - MTH1W - MS - 1") == "Mathematics")
+        expect(Teams.shortClassName("Middle School Students - 2026-27") == "Middle School Students")
+    }
+
+    func requestsStayOnTheSite() {
+        let path = Teams.upcomingWorkPath(now: t0)
+        expect(path.hasPrefix("/api/v1.0/edu/me/work?"))
+        expect(path.contains("dueDateTime%20ge%202027-01-15T08:00:00Z") || path.contains("dueDateTime ge 2027-01-15T08:00:00Z"))
+        expect(path.contains("isCompleted%20eq%20false"))
+        expect(!path.contains("+"))
+        expect(Teams.assignmentPath(classID: "c-1", id: "a-1") == "/api/v1.0/edu/classes/c-1/assignments/a-1")
+        expect(Teams.assignmentPath(classID: "../x", id: "a-1") == nil)
+        expect(Teams.assignmentPath(classID: "c-1", id: "a?b=1") == nil)
+        expect(Teams.isOnSite("https://assignments.edu.cloud.microsoft/api/v1.0/edu/me/work?$skiptoken=1"))
+        expect(!Teams.isOnSite("https://evil.example/api"))
+        expect(!Teams.isOnSite("http://assignments.edu.cloud.microsoft/api"))
+        expect(Teams.relativePath("https://assignments.edu.cloud.microsoft/api/v1.0/edu/me/work?$skiptoken=1") == "/api/v1.0/edu/me/work?$skiptoken=1")
+        expect(Teams.relativePath("https://evil.example/api") == nil)
+    }
+
+    private let lab = TeamsAssignment(id: "a-1", classID: "c-1", title: "Science 8: Lab", details: "Do it",
+                                      dueDate: t0.addingTimeInterval(hours(48)), link: "https://teams.microsoft.com/l/x")
+
+    func importsAndRemembers() {
+        let past = TeamsAssignment(id: "old", title: "Old", dueDate: t0.addingTimeInterval(-60))
+        let r = Teams.sync(tasks: [], state: TeamsState(), assignments: [lab, past, lab], now: t0)
+        expect(r.added.count == 1 && r.tasks.count == 1)
+        expect(r.tasks.first?.source == .teams(id: "a-1"))
+        expect(r.tasks.first?.isFromTeams == true && r.tasks.first?.isImported == true && r.tasks.first?.isFromBlackbaud == false)
+        expect(r.state.lastSeen["a-1"] == lab && r.state.lastSeen["old"] == nil)
+        expect(r.state.link(of: r.tasks[0])?.host == "teams.microsoft.com")
+        // Checking again adds nothing.
+        let again = Teams.sync(tasks: r.tasks, state: r.state, assignments: [lab], now: t0)
+        expect(again.added.isEmpty && again.tasks.count == 1)
+        // Deleted stays deleted.
+        var state = r.state
+        state.dismiss(id: "a-1")
+        let afterDelete = Teams.sync(tasks: [], state: state, assignments: [lab], now: t0)
+        expect(afterDelete.added.isEmpty && afterDelete.tasks.isEmpty)
+        // A link that isn't https isn't opened.
+        var odd = r.state
+        odd.lastSeen["a-1"]?.link = "file:///etc/passwd"
+        expect(odd.link(of: r.tasks[0]) == nil)
+    }
+
+    func teacherChangesFollowTheLockRule() {
+        let first = Teams.sync(tasks: [], state: TeamsState(), assignments: [lab], now: t0)
+        // Not locked in yet: a later deadline and new instructions both apply.
+        var later = lab
+        later.dueDate = t0.addingTimeInterval(hours(72))
+        later.details = "Do it well"
+        let moved = Teams.sync(tasks: first.tasks, state: first.state, assignments: [later], now: t0)
+        expect(moved.tasks[0].dueDate == later.dueDate && moved.tasks[0].details == "Do it well")
+        // Locked in (due within a day): only earlier.
+        let soon = TeamsAssignment(id: "s", title: "Quiz", dueDate: t0.addingTimeInterval(hours(10)))
+        let s1 = Teams.sync(tasks: [], state: TeamsState(), assignments: [soon], now: t0.addingTimeInterval(-hours(1)))
+        var looser = soon
+        looser.dueDate = t0.addingTimeInterval(hours(30))
+        let kept = Teams.sync(tasks: s1.tasks, state: s1.state, assignments: [looser], now: t0)
+        expect(kept.tasks[0].dueDate == soon.dueDate)
+        var stricter = soon
+        stricter.dueDate = t0.addingTimeInterval(hours(5))
+        let tightened = Teams.sync(tasks: s1.tasks, state: s1.state, assignments: [stricter], now: t0)
+        expect(tightened.tasks[0].dueDate == stricter.dueDate)
+        // Never into the past.
+        var past = lab
+        past.dueDate = t0.addingTimeInterval(-hours(1))
+        let notPast = Teams.sync(tasks: first.tasks, state: first.state, assignments: [past], now: t0)
+        expect(notPast.tasks[0].dueDate == lab.dueDate)
+        // Only a new link isn't a change.
+        var relinked = lab
+        relinked.link = "https://teams.microsoft.com/l/y"
+        let r = Teams.sync(tasks: first.tasks, state: first.state, assignments: [relinked], now: t0)
+        expect(r.notes.isEmpty && r.state.lastSeen["a-1"]?.link == relinked.link)
+        // Blackbaud tasks and your own aren't touched.
+        let mine = TaxTask(title: "Science 8: Lab", dueDate: lab.dueDate, createdAt: t0)
+        let both = Teams.sync(tasks: [mine], state: TeamsState(), assignments: [lab], now: t0)
+        expect(both.tasks.count == 2 && both.tasks[0] == mine)
+    }
+
+    func stoppingTeams() {
+        let soon = TaxTask(title: "Quiz", dueDate: t0.addingTimeInterval(hours(3)), createdAt: t0.addingTimeInterval(-hours(72)),
+                           source: .teams(id: "s"))
+        let bbSoon = TaxTask(title: "Lab", dueDate: t0.addingTimeInterval(hours(3)), createdAt: t0.addingTimeInterval(-hours(72)),
+                             source: .blackbaud(uid: "x"))
+        let longAgo = t0.addingTimeInterval(-hours(100))
+        expect(!LockPolicy.canStopTeamsWithoutGuardian(onSince: longAgo, tasks: [soon], now: t0))
+        expect(LockPolicy.canStopTeamsWithoutGuardian(onSince: longAgo, tasks: [bbSoon], now: t0))
+        expect(LockPolicy.canStopFeedWithoutGuardian(onSince: longAgo, tasks: [soon], now: t0))
+        expect(LockPolicy.canStopTeamsWithoutGuardian(onSince: t0.addingTimeInterval(-60), tasks: [soon], now: t0))
+    }
+
+    func savedFilesStillLoad() {
+        // Tasks saved before Teams import existed, and a Teams task, both round-trip.
+        let tasks = [TaxTask(title: "A", dueDate: t0, createdAt: t0, source: .blackbaud(uid: "u")),
+                     TaxTask(title: "B", dueDate: t0, createdAt: t0, source: .teams(id: "t"))]
+        let data = try! JSONEncoder().encode(tasks)
+        expect((try? JSONDecoder().decode([TaxTask].self, from: data)) == tasks)
+        let old = try? JSONDecoder().decode(Settings.self, from: Data(#"{"penaltyMinutes": 45}"#.utf8))
+        expect(old?.teamsOn == false && old?.penaltyMinutes == 45)
+        let state = try? JSONDecoder().decode(TeamsState.self, from: Data("{}".utf8))
+        expect(state == TeamsState())
+    }
+}
+
 let checks: [(String, () -> Void)] = [
     ("MatchRules.movedDeadlineStillMatches", { MatchRules().movedDeadlineStillMatches() }),
     ("RepeatRules.nextDueFindsTheRightDay", { RepeatRules().nextDueFindsTheRightDay() }),
@@ -1411,6 +1576,13 @@ let checks: [(String, () -> Void)] = [
     ("FeedSync.manualTasksAreUntouched", { FeedSync().manualTasksAreUntouched() }),
     ("FeedSync.endToEndFromFeedText", { FeedSync().endToEndFromFeedText() }),
     ("FeedPolicy.stoppingTheFeed", { FeedPolicy().stoppingTheFeed() }),
+    ("TeamsImport.readsAPage", { TeamsImport().readsAPage() }),
+    ("TeamsImport.onlyOwedWorkBecomesAssignments", { TeamsImport().onlyOwedWorkBecomesAssignments() }),
+    ("TeamsImport.requestsStayOnTheSite", { TeamsImport().requestsStayOnTheSite() }),
+    ("TeamsImport.importsAndRemembers", { TeamsImport().importsAndRemembers() }),
+    ("TeamsImport.teacherChangesFollowTheLockRule", { TeamsImport().teacherChangesFollowTheLockRule() }),
+    ("TeamsImport.stoppingTeams", { TeamsImport().stoppingTeams() }),
+    ("TeamsImport.savedFilesStillLoad", { TeamsImport().savedFilesStillLoad() }),
 ]
 
 for (name, run) in checks {

@@ -18,7 +18,7 @@ enum Theme {
     /// Picked from the full class name ("Mathematics 7 - MAT7 - 7B"), so two maths classes
     /// usually get different dots even though both show as "Mathematics".
     static func courseColor(for task: TaxTask) -> Color? {
-        guard task.isFromBlackbaud, let course = BlackbaudMatch.split(task.title).course else { return nil }
+        guard task.isImported, let course = BlackbaudMatch.split(task.title).course else { return nil }
         return courseColor(course)
     }
 

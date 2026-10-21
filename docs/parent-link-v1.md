@@ -346,7 +346,7 @@ UTF-8 JSON, before compression. Text fields are cut to the lengths shown. A fiel
   "tasks": [{
     "id": "…", "title": "≤200", "course": "≤100", "details": "≤500", "due": 0, "created": 0,
     "status": "pending" | "proven" | "provenLate" | "excused", "statusAt": null, "penaltyEndsAt": null,
-    "source": "manual" | "blackbaud" | "repeat", "repeatId": null, "checking": false,
+    "source": "manual" | "blackbaud" | "teams" | "repeat", "repeatId": null, "checking": false,
     "proofs": [{"id": "…", "at": 0, "files": 1, "note": "≤300",
                 "verdict": null | "accepted" | "rejected" | "error" | "guardianApproved", "reason": "≤300"}],
     "extensions": [{"at": 0, "hoursAsked": 3, "hoursGranted": 0, "decision": null | "granted" | "denied" | "error",

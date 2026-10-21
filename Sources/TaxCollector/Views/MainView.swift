@@ -10,6 +10,7 @@ enum Sheet: Identifiable, Equatable {
     case auditor
     case lastCheck(UUID)
     case blackbaud
+    case teams
     case extend(UUID)
 
     var id: String {
@@ -22,6 +23,7 @@ enum Sheet: Identifiable, Equatable {
         case .auditor: "auditor"
         case let .lastCheck(id): "last-check-\(id)"
         case .blackbaud: "blackbaud"
+        case .teams: "teams"
         case let .extend(id): "extend-\(id)"
         }
     }
@@ -72,10 +74,11 @@ struct TaskListView: View {
                 ContentUnavailableView {
                     Label("No Tasks", systemImage: "checklist")
                 } description: {
-                    Text("Add a task with a due date, or import your assignments from Blackbaud.")
+                    Text("Add a task with a due date, or import your assignments from Blackbaud or Teams.")
                 } actions: {
                     Button("New Task") { router.mainSheet = .newTask }
                     Button("Import from Blackbaud…") { router.mainSheet = .blackbaud }
+                    Button("Import from Teams…") { router.mainSheet = .teams }
                 }
             } else {
                 list
@@ -100,6 +103,14 @@ struct TaskListView: View {
                     Label("Blackbaud", systemImage: "graduationcap")
                 }
                 .help("Blackbaud import")
+            }
+            ToolbarItem {
+                Button {
+                    router.mainSheet = .teams
+                } label: {
+                    Label("Teams", systemImage: "person.3")
+                }
+                .help("Microsoft Teams import")
             }
             ToolbarItem {
                 Button {
@@ -227,6 +238,11 @@ struct TaskListView: View {
             let open: () -> Void = { router.mainSheet = .blackbaud }
             out.append(Notice(id: "feed", symbol: "exclamationmark.triangle.fill", color: .orange,
                               title: "Blackbaud import failed", detail: error, button: "Open…", action: open))
+        }
+        if model.teamsIsOn, let error = model.teamsError {
+            let open: () -> Void = { router.mainSheet = .teams }
+            out.append(Notice(id: "teams", symbol: "exclamationmark.triangle.fill", color: .orange,
+                              title: "Teams import failed", detail: error, button: "Open…", action: open))
         }
         return out
     }
@@ -544,6 +560,7 @@ struct SheetContent: View {
         case .auditor: AuditorView(dismiss: dismiss)
         case let .lastCheck(id): LastCheckView(taskID: id, dismiss: dismiss)
         case .blackbaud: BlackbaudView(dismiss: dismiss, askGuardian: { present(.guardian) })
+        case .teams: TeamsView(dismiss: dismiss, askGuardian: { present(.guardian) })
         case let .extend(id): ExtensionView(taskID: id, dismiss: dismiss)
         }
     }

@@ -83,11 +83,17 @@ public enum LockPolicy {
     /// free while nothing it imported is locked in, or in the first 5 minutes after turning it on.
     /// Otherwise only the guardian can. Tasks it already imported stay either way.
     public static func canStopFeedWithoutGuardian(onSince: Date?, tasks: [TaxTask], now: Date) -> Bool {
+        canStopImport(onSince: onSince, tasks: tasks.filter(\.isFromBlackbaud), now: now)
+    }
+
+    /// The same rule for Teams import.
+    public static func canStopTeamsWithoutGuardian(onSince: Date?, tasks: [TaxTask], now: Date) -> Bool {
+        canStopImport(onSince: onSince, tasks: tasks.filter(\.isFromTeams), now: now)
+    }
+
+    private static func canStopImport(onSince: Date?, tasks imported: [TaxTask], now: Date) -> Bool {
         if let onSince, now.timeIntervalSince(onSince) < creationGrace { return true }
-        return !tasks.contains { task in
-            guard case .blackbaud = task.source else { return false }
-            return isFrozen(task, now: now)
-        }
+        return !imported.contains { isFrozen($0, now: now) }
     }
 
     /// What a task becomes once its proof is accepted.

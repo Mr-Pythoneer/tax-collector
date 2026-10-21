@@ -109,6 +109,12 @@ struct AssignmentDetailView: View {
                 } label: {
                     Label("Open in Blackbaud", systemImage: "arrow.up.forward.app")
                 }
+            } else if let url = model.teams.link(of: task) {
+                Button {
+                    model.open(url)
+                } label: {
+                    Label("Open in Teams", systemImage: "arrow.up.forward.app")
+                }
             }
         }
     }

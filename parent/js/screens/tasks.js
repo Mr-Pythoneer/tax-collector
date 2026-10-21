@@ -51,7 +51,7 @@ export function renderTask({ app, view, params }) {
   const tz = zone(view);
   const pending = t.status === "pending";
   const editable = can(view, "tasks");
-  const source = t.source === "blackbaud" ? "School calendar" : t.source === "repeat" ? "Repeating task" : "Added by hand";
+  const source = t.source === "blackbaud" ? "School calendar" : t.source === "teams" ? "Microsoft Teams" : t.source === "repeat" ? "Repeating task" : "Added by hand";
 
   const proofRows = [...(t.proofs ?? [])].reverse().map((p) => {
     const onTime = p.at <= t.due;

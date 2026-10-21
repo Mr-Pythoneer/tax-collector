@@ -40,12 +40,12 @@ public enum Agenda {
         return sections
     }
 
-    /// Blackbaud titles look like "Mathematics 7 - MAT7 - 7B: Unit 1 Lesson 4". Split off the course
-    /// ("Mathematics 7") so the assignment name can lead. Your own tasks have no course.
+    /// Blackbaud titles look like "Mathematics 7 - MAT7 - 7B: Unit 1 Lesson 4", and Teams imports are made to
+    /// look the same. Split off the course ("Mathematics 7") so the assignment name can lead. Your own tasks have no course.
     public static func courseAndTitle(_ task: TaxTask) -> (course: String?, title: String) {
         // Older versions saved some titles with codes like "&#160;" still in them.
-        let title = task.isFromBlackbaud ? Blackbaud.plainText(task.title) : task.title
-        guard task.isFromBlackbaud, let colon = title.range(of: ": ") else { return (nil, title) }
+        let title = task.isImported ? Blackbaud.plainText(task.title) : task.title
+        guard task.isImported, let colon = title.range(of: ": ") else { return (nil, title) }
         let prefix = String(title[..<colon.lowerBound])
         let rest = String(title[colon.upperBound...]).trimmingCharacters(in: .whitespaces)
         guard !rest.isEmpty else { return (nil, title) }
