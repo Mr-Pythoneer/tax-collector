@@ -180,6 +180,19 @@ Tax Collector can import your Microsoft Teams assignments (the Assignments app) 
 
 **Fragile on purpose.** This relies on how Microsoft's web apps work today (the Assignments app's address, its sign-in audience and the Assignments button in Teams). If Microsoft changes any of them, import stops with an error rather than guessing. The parts to fix are kept together in `Sources/TaxCore/Teams.swift` (addresses and reading) and `Sources/TaxCollector/TeamsLink.swift` (the page).
 
+## Inbox for other tools
+
+Other programs on this Mac can hand Tax Collector a task by dropping a small JSON file into `~/Library/Application Support/TaxCollector/inbox/`. Tax Collector checks the folder every few seconds, turns each good file into an ordinary task, and deletes the file.
+
+```json
+{"v": 1, "id": "my-tool:2026-10-21:1", "title": "Read chapter 4", "details": "Optional notes", "due": "2026-10-28T17:00:00Z", "from": "My Tool"}
+```
+
+- `id` is the sender's own name for the item. Sending the same `id` again never adds a second task, even after a restart.
+- `due` is an ISO 8601 date-time. It must be in the future and within 120 days; titles are at most 200 characters; files over 20 KB are refused.
+- An imported task follows every normal rule: you can edit or delete it until 24 hours before it's due, and it needs proof like any other.
+- A file that can't be used is moved to `inbox/rejected/`, named with the reason, and the reason goes in the event log. At most 20 files are read per check.
+
 ## Data
 
 Everything lives in `~/Library/Application Support/TaxCollector/`:
@@ -193,6 +206,7 @@ Everything lives in `~/Library/Application Support/TaxCollector/`:
 - `guardian.json`, which holds only a salted PBKDF2 hash of the code
 - `parent-link.json`, which holds the server's address and setup code, this Mac's keys, and the paired phones. It's readable only by your account. A copy is kept in the app's preferences, so if the file is deleted, it comes back and the phones are told.
 - `proofs/<task>/<submission>/`, which holds your files plus the auditor's raw answer
+- `inbox/`, where other tools drop tasks (see above)
 - `events.log`
 
 ## Honest limits

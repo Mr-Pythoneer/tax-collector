@@ -1583,7 +1583,64 @@ let checks: [(String, () -> Void)] = [
     ("TeamsImport.teacherChangesFollowTheLockRule", { TeamsImport().teacherChangesFollowTheLockRule() }),
     ("TeamsImport.stoppingTeams", { TeamsImport().stoppingTeams() }),
     ("TeamsImport.savedFilesStillLoad", { TeamsImport().savedFilesStillLoad() }),
+    ("Inbox.acceptsAWellFormedFile", { InboxChecks().acceptsAWellFormedFile() }),
+    ("Inbox.refusesBadFiles", { InboxChecks().refusesBadFiles() }),
+    ("Inbox.sameInboxIDGivesTheSameTaskID", { InboxChecks().sameInboxIDGivesTheSameTaskID() }),
+    ("Inbox.scanSettlesFiles", { try! InboxChecks().scanSettlesFiles() }),
+    ("Inbox.scanIsCapped", { try! InboxChecks().scanIsCapped() }),
 ]
+
+
+struct InboxChecks {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+    private func json(_ extra: String = "", due: Date? = nil, id: String = "cc:1", title: String = "Read chapter 4", v: Int = 1) -> Data {
+        let f = ISO8601DateFormatter()
+        let d = f.string(from: due ?? now.addingTimeInterval(7 * 86400))
+        return Data("{\"v\":\(v),\"id\":\"\(id)\",\"title\":\"\(title)\",\"due\":\"\(d)\"\(extra)}".utf8)
+    }
+    func acceptsAWellFormedFile() {
+        guard case .success(let item) = Inbox.parse(json(",\"details\":\"From class\",\"from\":\"Class Capture\""), now: now) else { return expect(false) }
+        expect(item.title == "Read chapter 4" && item.details == "From class" && item.from == "Class Capture")
+        expect(abs(item.due.timeIntervalSince(now) - 7 * 86400) < 1)
+    }
+    func refusesBadFiles() {
+        expect(Inbox.parse(Data("nope".utf8), now: now) == .failure(.malformed))
+        expect(Inbox.parse(json(v: 2), now: now) == .failure(.unsupportedVersion))
+        expect(Inbox.parse(json(id: "  "), now: now) == .failure(.emptyID))
+        expect(Inbox.parse(json(title: "   "), now: now) == .failure(.emptyTitle))
+        expect(Inbox.parse(json(title: String(repeating: "x", count: 201)), now: now) == .failure(.titleTooLong))
+        expect(Inbox.parse(json(due: now.addingTimeInterval(-60)), now: now) == .failure(.dueInPast))
+        expect(Inbox.parse(json(due: now.addingTimeInterval(200 * 86400)), now: now) == .failure(.dueTooFar))
+        expect(Inbox.parse(Data(repeating: 0x20, count: Inbox.maxFileBytes + 1), now: now) == .failure(.tooLarge))
+    }
+    func sameInboxIDGivesTheSameTaskID() {
+        expect(Inbox.taskID(for: "cc:1") == Inbox.taskID(for: "cc:1"))
+        expect(Inbox.taskID(for: "cc:1") != Inbox.taskID(for: "cc:2"))
+    }
+    func scanSettlesFiles() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("tc-inbox-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try json().write(to: dir.appendingPathComponent("good.json"))
+        try Data("garbage".utf8).write(to: dir.appendingPathComponent("bad.json"))
+        try json().write(to: dir.appendingPathComponent("note.txt"))                 // not .json: ignored
+        let entries = Inbox.scan(dir: dir, now: now)
+        expect(entries.count == 2)
+        entries.forEach { Inbox.settle($0, in: dir) }
+        let fm = FileManager.default
+        expect(!fm.fileExists(atPath: dir.appendingPathComponent("good.json").path))                      // accepted: removed
+        expect(fm.fileExists(atPath: dir.appendingPathComponent("rejected/malformed-bad.json").path))    // refused: kept, with the reason
+        expect(fm.fileExists(atPath: dir.appendingPathComponent("note.txt").path))
+        expect(Inbox.scan(dir: dir, now: now).isEmpty)
+    }
+    func scanIsCapped() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("tc-inbox-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        for i in 0..<(Inbox.maxFilesPerScan + 5) { try json(id: "cc:\(i)").write(to: dir.appendingPathComponent("\(i).json")) }
+        expect(Inbox.scan(dir: dir, now: now).count == Inbox.maxFilesPerScan)
+    }
+}
 
 for (name, run) in checks {
     current = name

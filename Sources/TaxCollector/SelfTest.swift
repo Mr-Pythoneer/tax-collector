@@ -571,6 +571,41 @@ enum SelfTest {
         model.guardianSetupAllowedUntil = nil
         model.tick()
 
+        // Inbox: tasks other tools drop into <data dir>/inbox
+        do {
+            let inbox = model.store.inboxURL
+            try? FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+            let due = Date().addingTimeInterval(7 * 86400)
+            func drop(_ name: String, id: String, title: String) {
+                let body = "{\"v\":1,\"id\":\"\(id)\",\"title\":\"\(title)\",\"details\":\"From a test\",\"due\":\"\(ISO8601DateFormatter().string(from: due))\",\"from\":\"Self Test\"}"
+                try? Data(body.utf8).write(to: inbox.appendingPathComponent(name))
+            }
+            func scan() { model.lastInboxScan = .distantPast; model.importInbox() }
+            let before = model.tasks.count
+            drop("a.json", id: "selftest:1", title: "Inbox homework")
+            scan()
+            let landed = model.tasks.filter { $0.title == "Inbox homework" }
+            check("inbox: a dropped file becomes a task", landed.count == 1 && model.tasks.count == before + 1)
+            check("inbox: it is a manual task due when the file said",
+                  landed.first.map { $0.source == .manual && abs($0.dueDate.timeIntervalSince(due)) < 2 && $0.isPending } ?? false)
+            check("inbox: the details say who added it", landed.first?.details.contains("Self Test") == true)
+            check("inbox: an accepted file is removed", !FileManager.default.fileExists(atPath: inbox.appendingPathComponent("a.json").path))
+            drop("b.json", id: "selftest:1", title: "Inbox homework")
+            scan()
+            check("inbox: the same id never adds a second task", model.tasks.filter { $0.title == "Inbox homework" }.count == 1)
+            try? Data("not json".utf8).write(to: inbox.appendingPathComponent("c.json"))
+            scan()
+            check("inbox: an unusable file is moved aside, not retried",
+                  !FileManager.default.fileExists(atPath: inbox.appendingPathComponent("c.json").path)
+                  && FileManager.default.fileExists(atPath: inbox.appendingPathComponent("rejected/malformed-c.json").path))
+            check("inbox: a task from the inbox follows the normal edit rules", {
+                guard let t = landed.first else { return false }
+                return !model.isFrozen(t)        // a week out: still editable
+            }())
+            if let t = landed.first { _ = model.delete(t.id, guardianApproved: true) }
+            model.tick()
+        }
+
         // Everything ends up on disk
         let saved = model.store.loadTasks()
         check("storage: tasks on disk match the app", Set(saved.map(\.id)) == Set(model.tasks.map(\.id)))

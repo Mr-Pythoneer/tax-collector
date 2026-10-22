@@ -24,6 +24,8 @@ public final class Store {
     private var teamsURL: URL { dir.appendingPathComponent("teams.json") }
     public var linkURL: URL { dir.appendingPathComponent("parent-link.json") }
     public var logURL: URL { dir.appendingPathComponent("events.log") }
+    /// Where other tools on this Mac drop tasks for Tax Collector to pick up (see Inbox.swift).
+    public var inboxURL: URL { dir.appendingPathComponent("inbox", isDirectory: true) }
     public var proofsRoot: URL { dir.appendingPathComponent("proofs", isDirectory: true) }
 
     public func loadTasks() -> [TaxTask] { load([TaxTask].self, from: tasksURL) ?? [] }

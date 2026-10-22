@@ -108,6 +108,7 @@ final class AppModel {
     @ObservationIgnored var lastTeamsAttempt: Date?
 
     @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored var lastInboxScan = Date.distantPast
     @ObservationIgnored private var warned: [UUID: Set<Int>] = [:]
     @ObservationIgnored private var lastClockSave = Date.distantPast
     @ObservationIgnored private var lastUptime = ProcessInfo.processInfo.systemUptime
@@ -199,6 +200,7 @@ final class AppModel {
         }
 
         bringBackRepeats()
+        importInbox()
         // A parent's lock that has run out is gone, not just inactive.
         if let parentLock = settings.parentLock, !parentLock.isActive(at: now) {
             settings.parentLock = nil

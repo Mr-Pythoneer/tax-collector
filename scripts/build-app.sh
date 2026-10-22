@@ -15,7 +15,7 @@ fi
 swift build -c release --arch arm64
 BIN="$(swift build -c release --arch arm64 --show-bin-path)/TaxCollector"
 APP="build.noindex/Tax Collector.app"
-VERSION="0.7.0"
+VERSION="0.8.0"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
