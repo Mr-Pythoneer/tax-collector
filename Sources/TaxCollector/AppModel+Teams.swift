@@ -66,7 +66,11 @@ extension AppModel {
                 self.importTeams(items)
             case let .failure(failure):
                 if failure.signedOut { self.teamsSignedIn = false }
-                if self.teamsError != failure.message { self.store.log("TEAMS failed: \(failure.message)") }
+                // Logged when the reason changes. The detail says where the page stalled, so a lapse can be told
+                // from a slow load or a page Tax Collector doesn't know how to drive.
+                let line = failure.message + (failure.detail.map { " [\($0)]" } ?? "")
+                if self.lastTeamsLogged != line { self.store.log("TEAMS failed: \(line)") }
+                self.lastTeamsLogged = line
                 self.teamsError = failure.message
             }
         }

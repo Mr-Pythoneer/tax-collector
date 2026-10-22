@@ -14,6 +14,8 @@ final class TeamsLink: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDel
     struct Failure: Error, Equatable {
         var message: String
         var signedOut = false
+        /// What the page looked like when it stalled (hosts and yes/no facts only), for the log.
+        var detail: String?
     }
 
     var onSignedInChange: (Bool) -> Void = { _ in }
@@ -154,6 +156,7 @@ final class TeamsLink: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDel
         }
         Task {
             await restoreSession()
+            await clearTeamsPageData()
             let web = makeWebView(NSSize(width: 1000, height: 760))
             web.load(URLRequest(url: Self.startURL))
             let window = NSWindow(contentRect: web.frame, styleMask: [.titled, .closable, .resizable],
@@ -301,45 +304,82 @@ final class TeamsLink: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDel
         workerWindow = nil
     }
 
-    /// The hidden Teams page with its Assignments frame signed in. The page renews its own sign-in as it loads.
+    /// The hidden Teams page with its Assignments frame signed in. Teams is slow and sometimes flaky to open,
+    /// so a page that doesn't get there is dropped and tried once more from scratch.
     private func readyWorker() async -> Result<WKWebView, Failure> {
         if let worker, await isReady(worker) { return .success(worker) }
         await restoreSession()
-        lastNavigationError = nil
-        dropWorker()
-        let web = makeWebView(NSSize(width: 1100, height: 800))
-        worker = web
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 800),
-                              styleMask: [.borderless], backing: .buffered, defer: false)
-        window.contentView = web
-        window.isReleasedWhenClosed = false
-        window.alphaValue = 0.01
-        window.ignoresMouseEvents = true
-        window.hasShadow = false
-        window.canHide = false
-        window.level = .floating
-        window.collectionBehavior = [.stationary, .ignoresCycle, .canJoinAllSpaces, .fullScreenAuxiliary]
-        window.setFrameOrigin(NSPoint(x: 0, y: 0))
-        window.orderFrontRegardless()
-        workerWindow = window
-        web.load(URLRequest(url: Self.startURL))
-        // Teams takes a while: sign-in redirects, then the app, then the Assignments frame.
-        for _ in 0..<60 {
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-            if await isReady(web) {
-                await saveSession()
-                return .success(web)
+        var detail = ""
+        var onSignIn = false
+        for _ in 0..<2 {
+            await clearTeamsPageData()
+            lastNavigationError = nil
+            dropWorker()
+            let web = makeWebView(NSSize(width: 1100, height: 800))
+            worker = web
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 800),
+                                  styleMask: [.borderless], backing: .buffered, defer: false)
+            window.contentView = web
+            window.isReleasedWhenClosed = false
+            window.alphaValue = 0.01
+            window.ignoresMouseEvents = true
+            window.hasShadow = false
+            window.canHide = false
+            window.level = .floating
+            window.collectionBehavior = [.stationary, .ignoresCycle, .canJoinAllSpaces, .fullScreenAuxiliary]
+            window.setFrameOrigin(NSPoint(x: 0, y: 0))
+            window.orderFrontRegardless()
+            workerWindow = window
+            web.load(URLRequest(url: Self.startURL))
+            // Sign-in redirects, then the Teams app, then its Assignments frame.
+            for _ in 0..<120 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if await isReady(web) {
+                    await saveSession()
+                    return .success(web)
+                }
+                // Microsoft's own sign-in page that waits for someone to type: no point waiting any longer.
+                if Self.isOnSignInPage(web), await signInNeedsPerson(web) { break }
             }
+            lastStuckHost = web.url?.host
+            detail = await stallDetail(web)
+            onSignIn = Self.isOnSignInPage(web)
+            if onSignIn { break }
         }
-        lastStuckHost = web.url?.host
-        let stuckOnSignIn = Self.isOnSignInPage(web) || (web.url != nil && lastNavigationError == nil)
         dropWorker()
-        // A page that loaded but never got a sign-in (Microsoft's sign-in page, or Teams waiting for you)
-        // means signed out. Only a page that didn't load at all is a connection problem.
-        if stuckOnSignIn {
-            return .failure(Failure(message: "Signed out of Microsoft Teams. Sign in again to keep importing.", signedOut: true))
+        // Only Microsoft's sign-in page means signed out. Anything else is Teams being slow or odd, and the next check tries again.
+        if onSignIn {
+            return .failure(Failure(message: "Signed out of Microsoft Teams. Sign in again to keep importing.", signedOut: true,
+                                    detail: detail))
         }
-        return .failure(Failure(message: "Microsoft Teams didn't load. Check your internet connection."))
+        return .failure(Failure(message: "Teams didn't open properly. Tax Collector will try again soon.", detail: detail))
+    }
+
+    /// Whether Microsoft's page is asking for a password or an account choice, rather than passing straight through.
+    private func signInNeedsPerson(_ web: WKWebView) async -> Bool {
+        let script = "return !!document.querySelector('input[type=password], input[name=loginfmt], #tilesHolder, [data-test-id]');"
+        return ((try? await web.callAsyncJavaScript(script, arguments: [:], in: nil, contentWorld: .page)) as? Bool) ?? false
+    }
+
+    /// One line on where a stalled page got to. Hosts and yes/no facts only; never content or sign-in values.
+    private func stallDetail(_ web: WKWebView) async -> String {
+        var parts = ["host=\(web.url?.host ?? "none")", "loading=\(web.isLoading)", "nav=\(lastNavigationError ?? "none")"]
+        let script = """
+        return { path: location.pathname.slice(0, 40), state: document.readyState, visible: document.visibilityState,
+                 button: !!document.getElementById('\(Teams.appID)'),
+                 frame: !!document.querySelector('iframe[src*="assignments.edu.cloud.microsoft"]'),
+                 launcher: /desktop app|use the web app instead/i.test(document.body ? document.body.innerText.slice(0, 2000) : ''),
+                 errors: (window.__tcErrors || []).length };
+        """
+        if let info = try? await web.callAsyncJavaScript(script, arguments: [:], in: nil, contentWorld: .page) as? [String: Any] {
+            for key in ["path", "state", "visible", "button", "frame", "launcher", "errors"] {
+                if let value = info[key] { parts.append("\(key)=\(value)") }
+            }
+        } else {
+            parts.append("page=no answer")
+        }
+        parts.append("assignmentsFrame=\(frames[ObjectIdentifier(web)] != nil)")
+        return parts.joined(separator: " ")
     }
 
     private func get(_ path: String, on web: WKWebView) async -> Result<Data, Failure> {
@@ -363,6 +403,11 @@ final class TeamsLink: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDel
         guard !busy else { return .failure(Failure(message: "Already checking Teams.")) }
         busy = true
         defer { busy = false }
+        // A background app with no visible window gets throttled by macOS, and Teams then barely loads. Say this is
+        // real work: the check takes a few seconds once Teams isn't held back.
+        let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep],
+                                                             reason: "Reading Microsoft Teams assignments")
+        defer { ProcessInfo.processInfo.endActivity(activity) }
         let web: WKWebView
         switch await readyWorker() {
         case let .failure(f): return .failure(f)
@@ -402,6 +447,20 @@ final class TeamsLink: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDel
     }
 
     // MARK: Keeping the sign-in
+
+    /// Clears what Teams itself keeps in a page (its saved tokens), but not Microsoft's sign-in cookies.
+    /// Those saved tokens go stale after a few hours, and a window like this one can't renew them quietly (WebKit
+    /// blocks the hidden frame Teams would use). With them gone, Teams signs in again from the cookies, which
+    /// needs no one at the keyboard for as long as Microsoft's own sign-in lasts.
+    private func clearTeamsPageData() async {
+        let store = WKWebsiteDataStore.default()
+        // Only what holds sign-in state. The cached app files stay, so Teams still starts quickly.
+        let types: Set<String> = [WKWebsiteDataTypeLocalStorage, WKWebsiteDataTypeIndexedDBDatabases,
+                                  WKWebsiteDataTypeSessionStorage, WKWebsiteDataTypeWebSQLDatabases]
+        let records = await store.dataRecords(ofTypes: types)
+        let teams = records.filter { $0.displayName.lowercased().contains("cloud.microsoft") }
+        if !teams.isEmpty { await store.removeData(ofTypes: types, for: teams) }
+    }
 
     private static func isMicrosoftSignIn(_ domain: String) -> Bool {
         let d = domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))

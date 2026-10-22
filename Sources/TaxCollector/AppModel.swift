@@ -106,6 +106,7 @@ final class AppModel {
         .failure(.init(message: "Teams isn't connected."))
     }
     @ObservationIgnored var lastTeamsAttempt: Date?
+    @ObservationIgnored var lastTeamsLogged: String?
 
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored var lastInboxScan = Date.distantPast

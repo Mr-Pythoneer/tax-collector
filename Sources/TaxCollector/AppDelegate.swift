@@ -239,9 +239,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         }
         let watch = Task { [weak self] in
             let debug = out.deletingLastPathComponent().appendingPathComponent("teams-debug.json")
+            let timeline = out.deletingLastPathComponent().appendingPathComponent("teams-timeline.txt")
+            let started = Date()
             while !Task.isCancelled {
                 guard let self else { return }
                 let snap = await self.teamsLink.debugSnapshot()
+                var line = "t=\(Int(Date().timeIntervalSince(started)))s"
+                for (name, v) in snap.sorted(by: { $0.key < $1.key }) {
+                    guard let d = v as? [String: Any] else { continue }
+                    line += " | \(name) host=\(d["host"] ?? d["url"] ?? "?") body=\(d["bodyChars"] ?? "?") button=\(d["appButton"] ?? "?") frame=\(d["assignmentsFrame"] ?? "?") ready=\(d["ready"] ?? "?")"
+                }
+                if let handle = try? FileHandle(forWritingTo: timeline) {
+                    handle.seekToEndOfFile(); handle.write(Data((line + "\n").utf8)); try? handle.close()
+                } else {
+                    try? Data((line + "\n").utf8).write(to: timeline)
+                }
                 if !snap.isEmpty, let data = try? JSONSerialization.data(withJSONObject: snap, options: [.prettyPrinted, .sortedKeys]) {
                     try? data.write(to: debug)
                 }
