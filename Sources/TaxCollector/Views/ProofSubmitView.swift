@@ -182,7 +182,7 @@ struct ProofSubmitView: View {
                         Text("It was late, so the Mac stays locked for another \(Fmt.span(end.timeIntervalSince(model.now))).")
                             .foregroundStyle(.red)
                     }
-                    if task.isFromBlackbaud && task.checklist != nil {
+                    if task.isImported && task.checklist != nil {
                         Divider().padding(.vertical, 4)
                         LastCheckPanel(taskID: task.id)
                     }

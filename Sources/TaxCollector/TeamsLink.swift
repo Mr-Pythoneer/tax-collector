@@ -99,6 +99,7 @@ final class TeamsLink: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDel
         } catch (e) {}
         return plainFetch.apply(this, arguments);
       };
+      const SUBMIT = /^\\/api\\/v1\\.0\\/edu\\/classes\\/[0-9A-Za-z-]+\\/assignments\\/[0-9A-Za-z-]+\\/submissions\\/[0-9A-Za-z-]+\\/submit$/;
       const ready = () => token !== null && expires > Date.now() + 120000;
       Object.defineProperty(window, '__taxCollectorTeams', { value: Object.freeze({
         ready,
@@ -107,6 +108,12 @@ final class TeamsLink: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDel
           const url = new URL(path, location.origin);
           if (url.origin !== location.origin) return { status: 0, body: '' };
           const r = await plainFetch(url.href, { headers: { Accept: 'application/json', Authorization: token }, credentials: 'omit' });
+          return { status: r.status, body: await r.text() };
+        },
+        // The only thing this page ever sends besides reads: Turn in, for one submission, when asked to.
+        submit: async (path) => {
+          if (!SUBMIT.test(path) || !(token !== null && expires > Date.now() + 30000)) return { status: 0, body: '' };
+          const r = await plainFetch(new URL(path, location.origin).href, { method: 'POST', headers: { Accept: 'application/json', Authorization: token }, credentials: 'omit' });
           return { status: r.status, body: await r.text() };
         },
       }) });
@@ -444,6 +451,85 @@ final class TeamsLink: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDel
         // The page is only needed for the check; the next one starts fresh.
         dropWorker()
         return .success(Teams.assignments(from: items, classes: classes, instructions: instructions))
+    }
+
+    /// Turns an assignment in, the way the Turn in button does. Returns nil on success (or if Teams already shows it
+    /// handed in), or why it couldn't. Reads the assignment fresh first, and checks afterwards that Teams shows it
+    /// handed in. Anything unclear is left for you to do in Teams.
+    func turnIn(classID: String, assignmentID: String) async -> String? {
+        // A check of the list may be running; wait for it rather than start a second Teams page.
+        for _ in 0..<120 where busy { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+        guard !busy else { return "Tax Collector was busy reading Teams. Try again." }
+        busy = true
+        defer { busy = false }
+        let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep],
+                                                             reason: "Turning in an assignment on Microsoft Teams")
+        defer { ProcessInfo.processInfo.endActivity(activity) }
+        let web: WKWebView
+        switch await readyWorker() {
+        case let .failure(f): return f.message
+        case let .success(w): web = w
+        }
+        defer { dropWorker() }
+        guard let readPath = Teams.assignmentWithSubmissionPath(classID: classID, id: assignmentID) else {
+            return "Tax Collector doesn't have this assignment's details from Teams. Turn it in on Teams yourself."
+        }
+        func read() async -> Result<Teams.WorkItem, Failure> {
+            switch await get(readPath, on: web) {
+            case let .failure(f): return .failure(f)
+            case let .success(data):
+                guard let item = Teams.parseAssignment(data) else {
+                    return .failure(Failure(message: "Teams answered in a way Tax Collector doesn't understand."))
+                }
+                return .success(item)
+            }
+        }
+        let before: Teams.WorkItem
+        switch await read() {
+        case let .failure(f): return f.message
+        case let .success(item): before = item
+        }
+        let submissionID: String
+        switch Teams.handIn(for: before) {
+        case .alreadyDone: return nil
+        case let .notPossible(why): return why + " Turn it in on Teams yourself."
+        case let .ready(id): submissionID = id
+        }
+        guard let path = Teams.handInPath(classID: classID, assignmentID: assignmentID, submissionID: submissionID),
+              let answer = await inFrame(web, "return await window.__taxCollectorTeams.submit(path);", ["path": path]) as? [String: Any]
+        else { return "Teams didn't answer. Turn it in on Teams yourself." }
+        let status = (answer["status"] as? NSNumber)?.intValue ?? 0
+        let body = Data((answer["body"] as? String ?? "").utf8)
+        switch status {
+        case 200..<300: break
+        case 0: return "Teams' sign-in ran out before it could turn this in. Try again."
+        case 401: return "Signed out of Microsoft Teams. Sign in again, then try again."
+        default:
+            let why = Teams.errorMessage(from: body).map { " (\($0))" } ?? ""
+            return "Teams refused to turn it in (error \(status))\(why). Turn it in on Teams yourself."
+        }
+        // Believe Teams, not the request: read it back.
+        for _ in 0..<5 {
+            if case let .success(after) = await read(), ["submitted", "returned"].contains(after.submission ?? "") { return nil }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+        }
+        return "Teams accepted the request but doesn't show it as handed in. Check it on Teams."
+    }
+
+    /// What turning this assignment in would do, without doing it: the same reads as `turnIn`, then a description
+    /// of the decision. For testing against real Teams.
+    func previewHandIn(classID: String, assignmentID: String) async -> String {
+        for _ in 0..<120 where busy { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+        busy = true
+        defer { busy = false }
+        guard case let .success(web) = await readyWorker() else { return "Teams didn't open." }
+        defer { dropWorker() }
+        guard let path = Teams.assignmentWithSubmissionPath(classID: classID, id: assignmentID),
+              case let .success(data) = await get(path, on: web), let item = Teams.parseAssignment(data) else {
+            return "couldn't read the assignment"
+        }
+        let request = Teams.handInPath(classID: classID, assignmentID: assignmentID, submissionID: item.submissionID ?? "") != nil
+        return "submission=\(item.submission ?? "none") decision=\(Teams.handIn(for: item)) requestBuilt=\(request) undoAllowed=\(item.allowsUndo)"
     }
 
     // MARK: Keeping the sign-in

@@ -1463,6 +1463,65 @@ struct TeamsImport {
     }
 }
 
+struct TeamsTurnIn {
+    private func item(_ json: String) -> Teams.WorkItem? { Teams.parseAssignment(Data(json.utf8)) }
+
+    private func assignment(status: String = "assigned", submission: String? = "working", id: String? = "s-1",
+                            excused: Bool = false, undo: Bool = true) -> String {
+        var sub = ""
+        if let submission {
+            sub = #","submissions": [{"status": "\#(submission)""# + (id.map { #", "id": "\#($0)""# } ?? "")
+                + (excused ? #", "excusedDateTime": "2027-01-01T00:00:00Z""# : "") + "}]"
+        }
+        return #"{"id": "a-1", "classId": "c-1", "displayName": "Lab", "dueDateTime": "2027-01-15T20:00:00Z", "status": "\#(status)", "isCompleted": false, "allowStudentsToUndoTurnIn": \#(undo)\#(sub)}"#
+    }
+
+    func readsTheSubmission() {
+        guard let it = item(assignment()) else { return expect(false) }
+        expect(it.submissionID == "s-1" && it.submission == "working" && it.allowsUndo)
+        expect(item(assignment(undo: false))?.allowsUndo == false)
+    }
+
+    func decidesWhetherToTurnIn() {
+        expect(Teams.handIn(for: item(assignment())!) == .ready(submissionID: "s-1"))
+        expect(Teams.handIn(for: item(assignment(submission: "reassigned"))!) == .ready(submissionID: "s-1"))
+        expect(Teams.handIn(for: item(assignment(submission: "submitted"))!) == .alreadyDone)
+        expect(Teams.handIn(for: item(assignment(submission: "returned"))!) == .alreadyDone)
+        if case .notPossible = Teams.handIn(for: item(assignment(excused: true))!) {} else { expect(false) }
+        if case .notPossible = Teams.handIn(for: item(assignment(status: "draft"))!) {} else { expect(false) }
+        if case .notPossible = Teams.handIn(for: item(assignment(submission: nil))!) {} else { expect(false) }
+        if case .notPossible = Teams.handIn(for: item(assignment(id: nil))!) {} else { expect(false) }
+        // An ID that isn't plain letters, digits and dashes never goes into a URL.
+        if case .notPossible = Teams.handIn(for: item(assignment(id: "../x"))!) {} else { expect(false) }
+    }
+
+    func requestsAreExact() {
+        expect(Teams.handInPath(classID: "c-1", assignmentID: "a-1", submissionID: "s-1")
+               == "/api/v1.0/edu/classes/c-1/assignments/a-1/submissions/s-1/submit")
+        expect(Teams.handInPath(classID: "c-1", assignmentID: "a/1", submissionID: "s-1") == nil)
+        expect(Teams.handInPath(classID: "c-1", assignmentID: "a-1", submissionID: "") == nil)
+        expect(Teams.handInPath(classID: "c-1?x", assignmentID: "a-1", submissionID: "s-1") == nil)
+        expect(Teams.assignmentWithSubmissionPath(classID: "c-1", id: "a-1") == "/api/v1.0/edu/classes/c-1/assignments/a-1?$expand=submissions")
+        expect(Teams.assignmentWithSubmissionPath(classID: "..", id: "a-1") == nil)
+    }
+
+    func readsTeamsErrorText() {
+        let data = Data(#"{"error": {"code": "BadRequest", "message": "Submission <b>can't</b> be turned in: a file is required."}}"#.utf8)
+        expect(Teams.errorMessage(from: data) == "Submission can't be turned in: a file is required.")
+        expect(Teams.errorMessage(from: Data("oops".utf8)) == nil)
+        expect(Teams.errorMessage(from: Data(#"{"error": {}}"#.utf8)) == nil)
+    }
+
+    func teamsTasksGetALastCheck() {
+        var t = TaxTask(title: "Science 8: Lab", dueDate: t0, createdAt: t0, source: .teams(id: "a-1"), status: .proven(at: t0))
+        expect(t.needsLastCheck)
+        t.lastCheckDoneAt = t0
+        expect(!t.needsLastCheck)
+        expect(!TaxTask(title: "Mine", dueDate: t0, createdAt: t0, status: .proven(at: t0)).needsLastCheck)
+        expect(!TaxTask(title: "T", dueDate: t0, createdAt: t0, source: .teams(id: "a-1")).needsLastCheck)
+    }
+}
+
 let checks: [(String, () -> Void)] = [
     ("MatchRules.movedDeadlineStillMatches", { MatchRules().movedDeadlineStillMatches() }),
     ("RepeatRules.nextDueFindsTheRightDay", { RepeatRules().nextDueFindsTheRightDay() }),
@@ -1583,6 +1642,11 @@ let checks: [(String, () -> Void)] = [
     ("TeamsImport.teacherChangesFollowTheLockRule", { TeamsImport().teacherChangesFollowTheLockRule() }),
     ("TeamsImport.stoppingTeams", { TeamsImport().stoppingTeams() }),
     ("TeamsImport.savedFilesStillLoad", { TeamsImport().savedFilesStillLoad() }),
+    ("TeamsTurnIn.readsTheSubmission", { TeamsTurnIn().readsTheSubmission() }),
+    ("TeamsTurnIn.decidesWhetherToTurnIn", { TeamsTurnIn().decidesWhetherToTurnIn() }),
+    ("TeamsTurnIn.requestsAreExact", { TeamsTurnIn().requestsAreExact() }),
+    ("TeamsTurnIn.readsTeamsErrorText", { TeamsTurnIn().readsTeamsErrorText() }),
+    ("TeamsTurnIn.teamsTasksGetALastCheck", { TeamsTurnIn().teamsTasksGetALastCheck() }),
     ("Inbox.acceptsAWellFormedFile", { InboxChecks().acceptsAWellFormedFile() }),
     ("Inbox.refusesBadFiles", { InboxChecks().refusesBadFiles() }),
     ("Inbox.sameInboxIDGivesTheSameTaskID", { InboxChecks().sameInboxIDGivesTheSameTaskID() }),

@@ -119,6 +119,45 @@ public enum Teams {
         return url.path + query
     }
 
+    /// One assignment with your submission in it, for turning in.
+    public static func assignmentWithSubmissionPath(classID: String, id: String) -> String? {
+        assignmentPath(classID: classID, id: id).map { $0 + "?$expand=submissions" }
+    }
+
+    /// The one request that turns work in: the same one the Assignments page makes for its Turn in button.
+    public static func handInPath(classID: String, assignmentID: String, submissionID: String) -> String? {
+        guard isSafeID(classID), isSafeID(assignmentID), isSafeID(submissionID) else { return nil }
+        return "/api/v1.0/edu/classes/\(classID)/assignments/\(assignmentID)/submissions/\(submissionID)/submit"
+    }
+
+    public enum HandIn: Equatable, Sendable {
+        /// Safe to press Turn in with this submission.
+        case ready(submissionID: String)
+        /// Teams already shows it handed in (by you, or by an earlier try).
+        case alreadyDone
+        case notPossible(String)
+    }
+
+    /// Whether and how to turn in, from a fresh read of the assignment. Never guesses: anything unclear is left
+    /// for you to do in Teams.
+    public static func handIn(for item: WorkItem) -> HandIn {
+        if ["submitted", "returned"].contains(item.submission ?? "") { return .alreadyDone }
+        if item.excused { return .notPossible("Teams shows this assignment as excused.") }
+        guard item.status == "assigned" else { return .notPossible("Teams doesn't have this assignment open for hand-in.") }
+        guard let id = item.submissionID, isSafeID(id) else {
+            return .notPossible("Teams didn't show your submission for this assignment.")
+        }
+        return .ready(submissionID: id)
+    }
+
+    /// Teams' own words for why a request was refused, if it gave any.
+    public static func errorMessage(from data: Data) -> String? {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let error = root["error"] as? [String: Any],
+              let message = error["message"] as? String, !message.isEmpty else { return nil }
+        return String(Blackbaud.plainText(message).prefix(200))
+    }
+
     /// IDs go into a URL path, so only letters, digits and dashes.
     static func isSafeID(_ id: String) -> Bool {
         !id.isEmpty && id.count <= 100 && id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }
@@ -146,6 +185,10 @@ public enum Teams {
         public var excused: Bool
         public var link: String?
         public var instructionsHTML: String?
+        /// Your submission's ID, which turning in needs.
+        public var submissionID: String?
+        /// Whether the teacher lets you take a turn-in back.
+        public var allowsUndo: Bool
     }
 
     /// Reads one page of `/edu/me/work`. nil when it isn't that kind of answer at all.
@@ -177,7 +220,9 @@ public enum Teams {
             submission: (submission?["status"] as? String)?.lowercased(),
             excused: submission?["excusedDateTime"] is String,
             link: v["webUrl"] as? String,
-            instructionsHTML: instructions?["content"] as? String)
+            instructionsHTML: instructions?["content"] as? String,
+            submissionID: submission?["id"] as? String,
+            allowsUndo: v["allowStudentsToUndoTurnIn"] as? Bool ?? false)
     }
 
     /// Class ID → name, from `/edu/me/classes`.

@@ -101,6 +101,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             guard let self else { return }
             Task { await self.teamsLink.signOut() }
         }
+        model.teamsHandIn = { [weak self] task in
+            guard let self else { return "Tax Collector is shutting down." }
+            guard case let .teams(id) = task.source, let seen = self.model.teams.lastSeen[id], !seen.classID.isEmpty else {
+                return "Tax Collector doesn't have this assignment's details from Teams. Turn it in on Teams yourself."
+            }
+            // Testing aid: pretend Teams accepted it.
+            if env["TAXCOLLECTOR_TEST_TEAMS_JSON"].map({ !$0.isEmpty }) == true { return nil }
+            return await self.teamsLink.turnIn(classID: seen.classID, assignmentID: id)
+        }
         model.teamsFetcher = { [weak self] now in
             guard let self else { return .failure(.init(message: "Tax Collector is shutting down.")) }
             // Testing aid: read a saved work list (the JSON Teams sends) instead of signing in.
@@ -266,7 +275,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             case let .success(items):
                 let result = Teams.sync(tasks: model.tasks, state: model.teams, assignments: items, now: model.now)
                 let iso = ISO8601DateFormatter()
-                write(["owed": items.count,
+                var preview: [String] = []
+                for item in items.prefix(2) where !item.classID.isEmpty {
+                    preview.append(await teamsLink.previewHandIn(classID: item.classID, assignmentID: item.id))
+                }
+                write(["owed": items.count, "handInPreview": preview,
                        "wouldAdd": result.added.map { ["title": $0.title, "due": iso.string(from: $0.dueDate),
                                                       "details": String($0.details.prefix(300))] },
                        "links": items.filter { $0.link != nil }.count])

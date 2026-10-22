@@ -2,7 +2,7 @@ import SwiftUI
 import TaxCore
 
 /// After proof is accepted: tick off everything the assignment asked for, then Tax Collector
-/// marks it complete in Blackbaud for you.
+/// marks it complete in Blackbaud, or turns it in on Teams, for you.
 struct LastCheckPanel: View {
     @Environment(AppModel.self) private var model
     let taskID: UUID
@@ -20,7 +20,9 @@ struct LastCheckPanel: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Last check").font(.headline)
             Text(task.lastCheckDoneAt == nil
-                 ? "Tick everything the assignment asked for. Then Tax Collector marks it complete in Blackbaud."
+                 ? (task.isFromTeams
+                    ? "Tick everything the assignment asked for. Then Tax Collector turns it in on Teams for you. That really hands it in to your teacher."
+                    : "Tick everything the assignment asked for. Then Tax Collector marks it complete in Blackbaud.")
                  : "You confirmed all of this \(Fmt.dateTime.string(from: task.lastCheckDoneAt!)).")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -55,27 +57,38 @@ struct LastCheckPanel: View {
 
     @ViewBuilder
     private func markStatus(_ task: TaxTask) -> some View {
+        let teams = task.isFromTeams
         switch task.blackbaudMark {
         case nil:
             EmptyView()
         case .working:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("Marking it complete in Blackbaud…")
+                Text(teams ? "Turning it in on Teams…" : "Marking it complete in Blackbaud…")
             }
         case let .done(at):
-            Label("Marked complete in Blackbaud at \(Fmt.time.string(from: at)).", systemImage: "checkmark.circle.fill")
+            Label(teams ? "Turned in on Teams at \(Fmt.time.string(from: at))."
+                        : "Marked complete in Blackbaud at \(Fmt.time.string(from: at)).",
+                  systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
         case let .failed(reason):
             VStack(alignment: .leading, spacing: 6) {
-                Label("Couldn't mark it complete in Blackbaud: \(reason)", systemImage: "exclamationmark.triangle.fill")
+                Label(teams ? "Couldn't turn it in on Teams: \(reason)" : "Couldn't mark it complete in Blackbaud: \(reason)",
+                      systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
+                if teams {
+                    Text("You can turn it in yourself on Teams with Open in Teams in the task's details.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 HStack {
-                    if !model.blackbaudSignedIn {
+                    if teams && !model.teamsSignedIn {
+                        Button("Sign In to Teams…") { model.onTeamsSignIn() }
+                    } else if !teams && !model.blackbaudSignedIn {
                         Button("Sign In to Blackbaud…") { model.onBlackbaudSignIn() }
                     }
-                    Button("Try Again") { model.markInBlackbaud(taskID) }
+                    Button("Try Again") { model.markInSchool(taskID) }
                 }
                 .controlSize(.small)
             }

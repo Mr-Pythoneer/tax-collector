@@ -149,9 +149,9 @@ public struct TaxTask: Codable, Identifiable, Equatable, Sendable {
     /// From a school system, so its title starts with the class ("Mathematics 8: Lesson 4").
     public var isImported: Bool { isFromBlackbaud || isFromTeams }
 
-    /// Paid, but you haven't yet confirmed the checklist and had Blackbaud marked.
+    /// Paid, but you haven't yet confirmed the checklist and had Blackbaud marked (or Teams turned in).
     public var needsLastCheck: Bool {
-        guard isFromBlackbaud, lastCheckDoneAt == nil else { return false }
+        guard isImported, lastCheckDoneAt == nil else { return false }
         switch status {
         case .proven, .provenLate: return true
         case .pending, .excused: return false

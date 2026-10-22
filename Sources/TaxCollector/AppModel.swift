@@ -97,6 +97,8 @@ final class AppModel {
     @ObservationIgnored var onBlackbaudSignOut: () -> Void = {}
     /// Marks an assignment Completed in Blackbaud. Returns nil on success, or why it failed.
     @ObservationIgnored var blackbaudMarker: (TaxTask) async -> String? = { _ in "Blackbaud isn't connected." }
+    /// Turns an assignment in on Teams. Returns nil on success, or why it failed.
+    @ObservationIgnored var teamsHandIn: (TaxTask) async -> String? = { _ in "Teams isn't connected." }
     @ObservationIgnored var allowQuit = false
     /// Opens the Microsoft Teams sign-in window.
     @ObservationIgnored var onTeamsSignIn: () -> Void = {}
@@ -763,32 +765,37 @@ final class AppModel {
         save()
     }
 
-    /// Only after proof is accepted and every item is ticked. Then Blackbaud gets marked.
+    /// Only after proof is accepted and every item is ticked. Then Blackbaud gets marked, or Teams turned in.
     func confirmLastCheck(_ taskID: UUID) {
         guard let ti = tasks.firstIndex(where: { $0.id == taskID }), tasks[ti].needsLastCheck,
               let items = tasks[ti].checklist, !items.isEmpty, items.allSatisfy(\.done) else { return }
         tasks[ti].lastCheckDoneAt = now
         save()
         store.log("LAST CHECK confirmed for \"\(tasks[ti].title)\" (\(items.count) items)")
-        markInBlackbaud(taskID)
+        markInSchool(taskID)
     }
 
-    func markInBlackbaud(_ taskID: UUID) {
-        guard let ti = tasks.firstIndex(where: { $0.id == taskID }), tasks[ti].isFromBlackbaud,
+    /// After the last check: mark it Completed in Blackbaud, or turn it in on Teams. The result is kept in
+    /// `blackbaudMark` for both (the name is older than Teams import, and saved files use it).
+    func markInSchool(_ taskID: UUID) {
+        guard let ti = tasks.firstIndex(where: { $0.id == taskID }), tasks[ti].isImported,
               tasks[ti].lastCheckDoneAt != nil, tasks[ti].blackbaudMark != .working else { return }
         if case .done = tasks[ti].blackbaudMark { return }
         tasks[ti].blackbaudMark = .working
         save()
         let task = tasks[ti]
+        let teams = task.isFromTeams
         Task {
-            let failure = await self.blackbaudMarker(task)
+            let failure = teams ? await self.teamsHandIn(task) : await self.blackbaudMarker(task)
             guard let i = self.tasks.firstIndex(where: { $0.id == taskID }) else { return }
             if let failure {
                 self.tasks[i].blackbaudMark = .failed(reason: failure)
-                self.store.log("BLACKBAUD couldn't mark \"\(task.title)\" Completed: \(failure)")
+                self.store.log(teams ? "TEAMS couldn't turn in \"\(task.title)\": \(failure)"
+                                     : "BLACKBAUD couldn't mark \"\(task.title)\" Completed: \(failure)")
             } else {
                 self.tasks[i].blackbaudMark = .done(at: self.now)
-                self.store.log("BLACKBAUD marked \"\(task.title)\" Completed")
+                self.store.log(teams ? "TEAMS turned in \"\(task.title)\""
+                                     : "BLACKBAUD marked \"\(task.title)\" Completed")
             }
             self.save()
         }

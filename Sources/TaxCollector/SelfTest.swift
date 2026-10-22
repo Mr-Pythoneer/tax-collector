@@ -339,6 +339,44 @@ enum SelfTest {
             }
             model.blackbaudMarker = realMarker
         }
+
+        // Last check on Teams work, with a pretend Teams: confirming turns it in, and only after the confirmation
+        var handedIn: [String] = []
+        model.teamsHandIn = { task in handedIn.append(task.title); return nil }
+        model.addTask(title: "Science 8: Teams lab", details: "Write it up.", due: Date().addingTimeInterval(3 * 86400))
+        if let i = model.tasks.firstIndex(where: { $0.title == "Science 8: Teams lab" }) {
+            model.tasks[i].source = .teams(id: "selftest-teams-turnin")
+            let id = model.tasks[i].id
+            model.approveLatestProof(id)
+            check("teams hand-in: paid Teams work waits for the last check", model.task(id)?.needsLastCheck == true)
+            check("teams hand-in: nothing is turned in before you confirm", handedIn.isEmpty)
+            for item in model.task(id)?.checklist ?? [] { model.setChecklistItem(id, item: item.id, done: true) }
+            model.confirmLastCheck(id)
+            _ = await wait(5) { if case .done = model.task(id)?.blackbaudMark { true } else { false } }
+            var turnedIn = false
+            if case .done = model.task(id)?.blackbaudMark { turnedIn = true }
+            check("teams hand-in: confirming turns it in on Teams", turnedIn && handedIn == ["Science 8: Teams lab"])
+            model.markInSchool(id)
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            check("teams hand-in: it isn't turned in twice", handedIn.count == 1)
+        }
+        model.addTask(title: "Science 8: Teams refused", details: "", due: Date().addingTimeInterval(86400))
+        if let i = model.tasks.firstIndex(where: { $0.title == "Science 8: Teams refused" }) {
+            model.tasks[i].source = .teams(id: "selftest-teams-refused")
+            let id = model.tasks[i].id
+            model.teamsHandIn = { _ in "Teams refused to turn it in (error 400). Turn it in on Teams yourself." }
+            model.approveLatestProof(id)
+            for item in model.task(id)?.checklist ?? [] { model.setChecklistItem(id, item: item.id, done: true) }
+            model.confirmLastCheck(id)
+            _ = await wait(5) { model.task(id)?.blackbaudMarkFailed == true }
+            check("teams hand-in: a refusal is shown so it can be retried", model.task(id)?.blackbaudMarkFailed == true)
+            model.teamsHandIn = { _ in nil }
+            model.markInSchool(id)
+            _ = await wait(5) { if case .done = model.task(id)?.blackbaudMark { true } else { false } }
+            var retried = false
+            if case .done = model.task(id)?.blackbaudMark { retried = true }
+            check("teams hand-in: Try Again turns it in", retried)
+        }
         check("feed: turning import off is allowed while nothing it imported is locked in", model.stopFeed() == .saved)
 
         // Asking for more time, with fake Claude decisions
