@@ -58,3 +58,15 @@ plutil -lint -s "$PLIST"
 
 launchctl bootstrap "$DOMAIN" "$PLIST"
 echo "Installed to $DEST and started. It will start at every login."
+
+# One copy only. Opening the app from a disk image or Downloads makes it copy itself into /Applications, and an old
+# copy left there shows up next to this one (two Tax Collectors in Spotlight and Launchpad). Move any other copy of
+# the app to the Trash. Only for the real install: a throwaway test copy (TAXCOLLECTOR_DEST) leaves the others alone.
+if [ -z "${TAXCOLLECTOR_DEST:-}" ]; then
+    for other in "/Applications/Tax Collector.app"; do
+        if [ -d "$other" ] && [ "$other" != "$DEST" ]; then
+            mv "$other" "$HOME/.Trash/Tax Collector (old copy, $(date +%H%M%S)).app" \
+                && echo "Moved the extra copy at $other to the Trash."
+        fi
+    done
+fi
