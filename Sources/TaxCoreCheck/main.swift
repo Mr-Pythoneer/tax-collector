@@ -187,6 +187,45 @@ struct AllowlistRules {
         expect(Allowlist.isAllowed(bundleID: "com.apple.finder", extra: [], selfID: nil))
     }
 
+    func everyBrowserAllowedDuringALock() {
+        for browser in Allowlist.browsers {
+            expect(Allowlist.isAllowed(bundleID: browser.bundleID, extra: [], selfID: nil))
+            expect(!Allowlist.shouldClose(bundleID: browser.bundleID, locked: true, strength: .homework, extra: [],
+                                          blocked: [], selfID: nil))
+        }
+        // The browsers named on this Mac and the usual ones are there, and helpers and other channels are covered.
+        for id in ["com.apple.Safari", "com.google.Chrome", "org.mozilla.firefox", "com.microsoft.edgemac", "com.brave.Browser",
+                   "company.thebrowser.Browser", "com.google.Chrome.helper", "com.google.Chrome.canary",
+                   "com.microsoft.edgemac.Beta", "com.google.chrome.for.testing"] {
+            expect(Allowlist.isAllowed(bundleID: id, extra: [], selfID: nil))
+        }
+        // IDs are unique, and every one looks like a reverse-DNS ID.
+        let ids = Allowlist.browsers.map(\.bundleID)
+        expect(Set(ids).count == ids.count)
+        expect(ids.allSatisfy { $0.contains(".") && !$0.hasPrefix(".") && !$0.hasSuffix(".") })
+    }
+
+    func browsersDontLetOtherAppsThrough() {
+        // Apps that merely open web links aren't browsers: they stay closed.
+        for id in ["com.googlecode.iterm2", "org.hammerspoon.Hammerspoon", "com.apple.Terminal", "com.microsoft.VSCode",
+                   "com.alibaba.tongyi", "com.google.Chromefake", "com.apple.Safarifake", "org.mozilla.firefoxfake"] {
+            expect(!Allowlist.isAllowed(bundleID: id, extra: [], selfID: nil))
+            expect(Allowlist.shouldClose(bundleID: id, locked: true, strength: .homework, extra: [], blocked: [], selfID: nil))
+        }
+    }
+
+    func aParentCanStillBlockABrowser() {
+        // Blocked beats allowed, locked or not.
+        expect(Allowlist.shouldClose(bundleID: "com.google.Chrome", locked: true, strength: .homework, extra: [],
+                                     blocked: ["com.google.Chrome"], selfID: nil))
+        expect(Allowlist.shouldClose(bundleID: "com.google.Chrome", locked: false, strength: .homework, extra: [],
+                                     blocked: ["com.google.Chrome"], selfID: nil))
+        // An "everything" lock from a phone still closes them.
+        expect(Allowlist.shouldClose(bundleID: "com.apple.Safari", locked: true, strength: .all, extra: [], blocked: [], selfID: nil))
+        // Not locked and not blocked: nothing is closed.
+        expect(!Allowlist.shouldClose(bundleID: "com.google.Chrome", locked: false, strength: .homework, extra: [], blocked: [], selfID: nil))
+    }
+
     func othersBlocked() {
         expect(!Allowlist.isAllowed(bundleID: "com.microsoft.VSCode", extra: [], selfID: nil))
         expect(!Allowlist.isAllowed(bundleID: "com.apple.Terminal", extra: [], selfID: nil))
@@ -1598,6 +1637,9 @@ let checks: [(String, () -> Void)] = [
     ("ClockAndGuardian.saltDiffersEachTime", { ClockAndGuardian().saltDiffersEachTime() }),
     ("ClockAndGuardian.wrongCodesBackOff", { ClockAndGuardian().wrongCodesBackOff() }),
     ("AllowlistRules.listedAppsAndHelpersAllowed", { AllowlistRules().listedAppsAndHelpersAllowed() }),
+    ("AllowlistRules.everyBrowserAllowedDuringALock", { AllowlistRules().everyBrowserAllowedDuringALock() }),
+    ("AllowlistRules.browsersDontLetOtherAppsThrough", { AllowlistRules().browsersDontLetOtherAppsThrough() }),
+    ("AllowlistRules.aParentCanStillBlockABrowser", { AllowlistRules().aParentCanStillBlockABrowser() }),
     ("AllowlistRules.othersBlocked", { AllowlistRules().othersBlocked() }),
     ("AllowlistRules.guardianExtrasAndSelfAllowed", { AllowlistRules().guardianExtrasAndSelfAllowed() }),
     ("Persistence.roundTripsTasksAndSettings", { Persistence().roundTripsTasksAndSettings() }),

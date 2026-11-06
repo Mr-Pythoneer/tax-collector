@@ -238,7 +238,7 @@ extension AppModel {
             .sorted { ($0.lastSeen ?? 0) > ($1.lastSeen ?? 0) }
         return StateBuilder.Input(
             seq: seq, now: now, computer: computer, tasks: tasks, recurring: recurring, settings: settings, lock: lock,
-            checking: checking, builtIn: Allowlist.apps.map { AppRef(id: $0.bundleID, name: $0.name) }, running: running,
+            checking: checking, builtIn: (Allowlist.apps + Allowlist.browsers).map { AppRef(id: $0.bundleID, name: $0.name) }, running: running,
             recent: recent, activity: activityEvents(), results: results, devices: devices, flags: flags,
             accessBy: settings.parentLock?.by ?? "", accessAt: accessAt)
     }

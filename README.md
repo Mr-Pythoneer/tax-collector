@@ -4,7 +4,7 @@ A Mac menu-bar app that holds you to your own deadlines. Add a task and a due da
 
 **[Download Tax Collector (.dmg)](https://github.com/Mr-Pythoneer/tax-collector/releases/latest/download/TaxCollector.dmg)** for Macs with Apple silicon (M1 or newer) and macOS 14 or later. It's the newest version; the steps to install it are [below](#install-from-the-disk-image) and inside the disk image, and so is [how to uninstall it](#uninstall).
 
-**Allowed during a lock:** Arc, Claude, Word, Excel, PowerPoint, Outlook, OneNote, Teams, OneDrive, Mail, Zoom, VooV Meeting, Activity Monitor (plus Finder and a few system helpers).
+**Allowed during a lock:** every web browser (Safari, Chrome, Firefox, Edge, Brave, Arc, Opera, Vivaldi and others: some school sites only work in one of them), Claude, Word, Excel, PowerPoint, Outlook, OneNote, Teams, OneDrive, Mail, Zoom, VooV Meeting, Activity Monitor (plus Finder and a few system helpers).
 
 ## The task list
 
@@ -225,7 +225,7 @@ This is self-accountability, not parental-control software.
 - **Before a lock starts**, you could still turn it off: `launchctl bootout`, editing the JSON, or switching it off in System Settings → Login Items.
 - **During a lock**, Terminal, System Settings and text editors are closed, so those routes are blocked.
 - **Activity Monitor:** a plain Quit is refused. Force Quit works, but launchd restarts the app within about 2 seconds.
-- **With parents' phones paired**, these routes don't go unnoticed. The phones see when the app stops reporting, and when it restarts after its files or rules were changed. But someone who controls the server, or rebuilds the app, can still get around it. And it can't block websites: Arc stays open during a lock, and so does everything in it.
+- **With parents' phones paired**, these routes don't go unnoticed. The phones see when the app stops reporting, and when it restarts after its files or rules were changed. But someone who controls the server, or rebuilds the app, can still get around it. And it can't block websites: every web browser stays open during a lock (some school sites need one browser, some another), and so does everything in them. A parent can still shut one browser out from the phone's **Blocked apps**.
 
 ## Blackbaud import
 

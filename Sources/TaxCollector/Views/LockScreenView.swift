@@ -91,7 +91,7 @@ struct LockScreenView: View {
 
     private var allowedApps: String {
         if model.lock.strength == .all { return "None: a parent locked everything." }
-        var names = Allowlist.apps.map(\.name)
+        var names = Allowlist.apps.map(\.name) + ["every web browser"]
         let extra = model.settings.extraAllowedBundleIDs.count
         if extra > 0 { names.append("\(extra) more added by your guardian") }
         return names.joined(separator: ", ")

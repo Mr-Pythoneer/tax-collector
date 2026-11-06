@@ -23,6 +23,38 @@ public enum Allowlist {
         App(name: "Activity Monitor", bundleID: "com.apple.ActivityMonitor"),
     ]
 
+    /// Every web browser. Some of a school's sites only work in one browser and some only after trying another,
+    /// so during a lock all of them stay open. (Arc is in the list above.) A helper whose ID starts with one of these
+    /// is covered too, which is how Chrome's Beta and Canary and Edge's Beta are allowed. A parent's blocked app
+    /// still beats this list, so a phone can shut one browser out.
+    /// Not every browser is installed here, so the IDs of the ones that aren't come from each vendor's own app.
+    public static let browsers: [App] = [
+        App(name: "Safari", bundleID: "com.apple.Safari"),
+        App(name: "Safari Technology Preview", bundleID: "com.apple.SafariTechnologyPreview"),
+        App(name: "Google Chrome", bundleID: "com.google.Chrome"),
+        App(name: "Google Chrome for Testing", bundleID: "com.google.chrome.for.testing"),
+        App(name: "Chromium", bundleID: "org.chromium.Chromium"),
+        App(name: "Firefox", bundleID: "org.mozilla.firefox"),
+        App(name: "Firefox Developer Edition", bundleID: "org.mozilla.firefoxdeveloperedition"),
+        App(name: "Firefox Nightly", bundleID: "org.mozilla.nightly"),
+        App(name: "Microsoft Edge", bundleID: "com.microsoft.edgemac"),
+        App(name: "Brave", bundleID: "com.brave.Browser"),
+        App(name: "Opera", bundleID: "com.operasoftware.Opera"),
+        App(name: "Opera GX", bundleID: "com.operasoftware.OperaGX"),
+        App(name: "Vivaldi", bundleID: "com.vivaldi.Vivaldi"),
+        App(name: "Orion", bundleID: "com.kagi.kagimacOS"),
+        App(name: "DuckDuckGo", bundleID: "com.duckduckgo.macos.browser"),
+        App(name: "Tor Browser", bundleID: "org.torproject.torbrowser"),
+        App(name: "Zen", bundleID: "app.zen-browser.zen"),
+        App(name: "Dia", bundleID: "company.thebrowser.dia"),
+        App(name: "Comet", bundleID: "ai.perplexity.comet"),
+        App(name: "ChatGPT Atlas", bundleID: "com.openai.atlas"),
+        App(name: "SigmaOS", bundleID: "com.sigmaos.sigmaos.macos"),
+        App(name: "Waterfox", bundleID: "net.waterfox.waterfox"),
+        App(name: "LibreWolf", bundleID: "io.gitlab.librewolf-community"),
+        App(name: "Yandex Browser", bundleID: "ru.yandex.desktop.yandex-browser"),
+    ]
+
     /// Things the Mac (or the allowed apps) need to keep working. Not shown in the list.
     public static let implicit: Set<String> = [
         "com.apple.finder",
@@ -65,7 +97,7 @@ public enum Allowlist {
         guard let id = bundleID else { return false }
         if let selfID, id == selfID { return true }
         if implicit.contains(id) { return true }
-        let allowed = apps.map(\.bundleID) + extra
+        let allowed = apps.map(\.bundleID) + browsers.map(\.bundleID) + extra
         return allowed.contains { id == $0 || id.hasPrefix($0 + ".") }
     }
 }
