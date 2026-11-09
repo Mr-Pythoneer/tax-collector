@@ -7,6 +7,8 @@ struct RewardsView: View {
     @Environment(AppModel.self) private var model
     let dismiss: () -> Void
     let askGuardian: () -> Void
+    /// Opens the guardian code, then just the credits controls.
+    var giveCredits: () -> Void = {}
 
     enum Tab: String, CaseIterable, Identifiable {
         case wallet = "Wallet"
@@ -17,9 +19,11 @@ struct RewardsView: View {
 
     @State private var tab: Tab
 
-    init(dismiss: @escaping () -> Void, askGuardian: @escaping () -> Void, tab: Tab = .wallet) {
+    init(dismiss: @escaping () -> Void, askGuardian: @escaping () -> Void, giveCredits: @escaping () -> Void = {},
+         tab: Tab = .wallet) {
         self.dismiss = dismiss
         self.askGuardian = askGuardian
+        self.giveCredits = giveCredits
         _tab = State(initialValue: tab)
     }
 
@@ -41,7 +45,7 @@ struct RewardsView: View {
             .padding(.bottom, 8)
             Divider()
             switch tab {
-            case .wallet: WalletTab()
+            case .wallet: WalletTab(giveCredits: giveCredits)
             case .watchlist: WatchlistTab(askGuardian: askGuardian)
             case .wishlist: WishlistTab()
             }
@@ -54,6 +58,7 @@ struct RewardsView: View {
 
 private struct WalletTab: View {
     @Environment(AppModel.self) private var model
+    let giveCredits: () -> Void
     @State private var minutes = 30
     @State private var message: RewardsMessage?
 
@@ -71,6 +76,13 @@ private struct WalletTab: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, 4)
+                HStack {
+                    Text("A guardian can give or take credits with their code.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Give or Take Credits…", action: giveCredits)
+                }
             }
 
             Section("Free time") {
@@ -213,10 +225,11 @@ private struct WatchlistTab: View {
 
             Section("Add") {
                 HStack {
-                    TextField("Website", text: $site, prompt: Text("youtube.com"))
+                    TextField("Website", text: $site, prompt: Text("Type a website, like youtube.com"))
+                        .textFieldStyle(.roundedBorder)
+                        .labelsHidden()
                         .onSubmit(addSite)
                     Button("Add Site", action: addSite)
-                        .disabled(site.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Menu("Add App") {
@@ -290,7 +303,10 @@ private struct WatchlistTab: View {
 
     private func addSite() {
         let text = site.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty else {
+            message = .error("Type a website in the box first, like youtube.com.")
+            return
+        }
         if let why = model.addSite(text) {
             message = .error(why)
         } else {
@@ -405,15 +421,16 @@ private struct WishlistTab: View {
     var body: some View {
         Form {
             Section {
-                TextField("Name", text: $name, prompt: Text("Wireless headphones"))
-                TextField("Real price", text: $price, prompt: Text("$25"))
+                TextField("Name", text: $name, prompt: Text("e.g. wireless headphones"))
+                    .textFieldStyle(.roundedBorder)
+                TextField("Real price", text: $price, prompt: Text("e.g. $25"))
+                    .textFieldStyle(.roundedBorder)
                 TextField("Note", text: $note, prompt: Text("Optional: which one, where from"))
+                    .textFieldStyle(.roundedBorder)
                 HStack {
                     if let message { message.view }
                     Spacer()
                     Button("Add to Wishlist", action: add)
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty
-                                  || price.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             } header: {
                 Text("Add something you want")

@@ -6,6 +6,8 @@ import UniformTypeIdentifiers
 struct GuardianView: View {
     @Environment(AppModel.self) private var model
     let dismiss: () -> Void
+    /// Opened from the wallet: once the code is right, only the credits controls.
+    var creditsOnly = false
 
     @State private var code = ""
     @State private var unlocked = false
@@ -13,7 +15,9 @@ struct GuardianView: View {
 
     var body: some View {
         Group {
-            if unlocked {
+            if unlocked && creditsOnly {
+                GuardianCreditsPanel(dismiss: dismiss)
+            } else if unlocked {
                 GuardianPanel(dismiss: dismiss)
             } else {
                 gate
@@ -24,7 +28,9 @@ struct GuardianView: View {
     private var gate: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Guardian Code").font(.title2.bold())
-            Text("Hand the Mac to your guardian. Their code can unlock, excuse a task or change the rules.")
+            Text(creditsOnly
+                 ? "Hand the Mac to your guardian. Their code can give or take credits."
+                 : "Hand the Mac to your guardian. Their code can unlock, excuse a task or change the rules.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             SecureField("Guardian code", text: $code)
@@ -88,10 +94,10 @@ private struct GuardianPanel: View {
             Divider()
             Form {
                 unlockSection
+                RewardsGuardianSection()
                 tasksSection
                 ParentsSection()
                 BlockedAppsSection()
-                RewardsGuardianSection()
                 rulesSection
                 codeSection
                 Section {
@@ -259,6 +265,26 @@ private struct GuardianPanel: View {
 }
 
 /// Guardian Settings: how fast credits come, the wallet, the wishlist and the watchlist.
+/// Just the rewards part of Guardian Settings, opened from the wallet.
+private struct GuardianCreditsPanel: View {
+    let dismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Give or Take Credits").font(.title2.bold())
+                Spacer()
+                Button("Done", action: dismiss).keyboardShortcut(.defaultAction)
+            }
+            .padding(20)
+            Divider()
+            Form { RewardsGuardianSection() }
+                .formStyle(.grouped)
+        }
+        .frame(width: 560, height: 620)
+    }
+}
+
 private struct RewardsGuardianSection: View {
     @Environment(AppModel.self) private var model
 
@@ -279,10 +305,11 @@ private struct RewardsGuardianSection: View {
                 Text("Amount: \(Credits.format(amount))")
             }
             TextField("Note", text: $note, prompt: Text("Optional: what it's for"))
+                .textFieldStyle(.roundedBorder)
             HStack {
                 Spacer()
                 Button("Take Away") { adjust(-amount) }
-                Button("Add") { adjust(amount) }
+                Button("Give") { adjust(amount) }
             }
             .controlSize(.small)
         } header: {

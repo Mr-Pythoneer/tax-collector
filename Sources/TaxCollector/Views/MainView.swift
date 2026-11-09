@@ -6,6 +6,8 @@ enum Sheet: Identifiable, Equatable {
     case edit(UUID)
     case proof(UUID)
     case guardian
+    /// The guardian code, then just giving or taking credits.
+    case guardianCredits
     case log
     case auditor
     case lastCheck(UUID)
@@ -20,6 +22,7 @@ enum Sheet: Identifiable, Equatable {
         case let .edit(id): "edit-\(id)"
         case let .proof(id): "proof-\(id)"
         case .guardian: "guardian"
+        case .guardianCredits: "guardian-credits"
         case .log: "log"
         case .auditor: "auditor"
         case let .lastCheck(id): "last-check-\(id)"
@@ -566,13 +569,15 @@ struct SheetContent: View {
         case let .edit(id): TaskEditorView(editing: id, dismiss: dismiss, askGuardian: { present(.guardian) })
         case let .proof(id): ProofSubmitView(taskID: id, dismiss: dismiss, askForTime: { present(.extend(id)) })
         case .guardian: GuardianView(dismiss: dismiss)
+        case .guardianCredits: GuardianView(dismiss: dismiss, creditsOnly: true)
         case .log: LogView(dismiss: dismiss)
         case .auditor: AuditorView(dismiss: dismiss)
         case let .lastCheck(id): LastCheckView(taskID: id, dismiss: dismiss)
         case .blackbaud: BlackbaudView(dismiss: dismiss, askGuardian: { present(.guardian) })
         case .teams: TeamsView(dismiss: dismiss, askGuardian: { present(.guardian) })
         case let .extend(id): ExtensionView(taskID: id, dismiss: dismiss)
-        case .rewards: RewardsView(dismiss: dismiss, askGuardian: { present(.guardian) })
+        case .rewards: RewardsView(dismiss: dismiss, askGuardian: { present(.guardian) },
+                                    giveCredits: { present(.guardianCredits) })
         }
     }
 }
