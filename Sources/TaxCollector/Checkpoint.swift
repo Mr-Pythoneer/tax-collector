@@ -57,15 +57,16 @@ enum Checkpoint {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
                 as? [[String: Any]],
               let primary = NSScreen.screens.first else { return nil }
+        var rects: [CGRect] = []
         for info in list {
             guard (info[kCGWindowOwnerPID as String] as? Int).map({ pid_t($0) }) == pid,
                   (info[kCGWindowLayer as String] as? Int) == 0,
                   let bounds = info[kCGWindowBounds as String] as? [String: Any],
-                  let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary),
-                  rect.width >= 200, rect.height >= 150 else { continue }
-            return NSRect(x: rect.minX, y: primary.frame.maxY - rect.maxY, width: rect.width, height: rect.height)
+                  let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { continue }
+            rects.append(rect)
         }
-        return nil
+        guard let rect = Rewards.coverRect(frontToBack: rects) else { return nil }
+        return NSRect(x: rect.minX, y: primary.frame.maxY - rect.maxY, width: rect.width, height: rect.height)
     }
 }
 
@@ -171,6 +172,8 @@ final class CheckpointController {
     }
 
     func check() {
+        // Not started (the self-test): never look at the real screen.
+        guard timer != nil else { return }
         guard !model.rewards.watchlist.isEmpty else {
             setWatched(nil)
             hide()
@@ -245,7 +248,7 @@ final class CheckpointController {
             ?? (NSScreen.main ?? NSScreen.screens.first)?.frame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
         let panel = self.panel ?? makePanel()
         if shownItemID != item.id {
-            panel.contentView = makeContent(item) { [weak self] in self?.leave() }
+            panel.contentView = container(makeContent(item) { [weak self] in self?.leave() })
             if coveringItem == nil || shownPID != app.processIdentifier {
                 log("CHECKPOINT over \(item.name) in \(app.localizedName ?? "an app")")
             }
@@ -255,6 +258,36 @@ final class CheckpointController {
         coveringItem = item
         if panel.frame != frame { panel.setFrame(frame, display: true) }
         if !panel.isVisible { panel.orderFrontRegardless() }
+    }
+
+    /// Puts the content in a plain view that follows the panel's size, so the content can never resize the panel.
+    private func container(_ content: NSView) -> NSView {
+        let box = NSView(frame: NSRect(origin: .zero, size: panel?.frame.size ?? NSSize(width: 600, height: 400)))
+        content.translatesAutoresizingMaskIntoConstraints = true
+        content.frame = box.bounds
+        content.autoresizingMask = [.width, .height]
+        box.addSubview(content)
+        return box
+    }
+
+    /// Testing aid: lays the checkpoint out in an invisible, off-screen panel of `size` and returns the size
+    /// the panel ends up with. It should stay `size`.
+    func panelSizeAfterLayout(item: WatchItem, size: NSSize) async -> NSSize {
+        let panel = self.panel ?? makePanel()
+        panel.alphaValue = 0
+        panel.ignoresMouseEvents = true
+        panel.contentView = container(makeContent(item) {})
+        panel.setFrame(NSRect(origin: NSPoint(x: -20000, y: -20000), size: size), display: true)
+        panel.orderFrontRegardless()
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        panel.contentView?.layoutSubtreeIfNeeded()
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        let result = panel.frame.size
+        panel.orderOut(nil)
+        panel.contentView = nil
+        panel.alphaValue = 1
+        panel.ignoresMouseEvents = false
+        return result
     }
 
     private func makePanel() -> CheckpointPanel {

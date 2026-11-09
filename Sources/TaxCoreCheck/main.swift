@@ -1729,6 +1729,22 @@ struct RewardsRules {
         expect(Rewards.isOpen(yt, state: s, now: t0.addingTimeInterval(21 * 60)))
     }
 
+    func coverTheMainWindow() {
+        let page = CGRect(x: 0, y: 0, width: 1710, height: 1112)
+        let toolbar = CGRect(x: 0, y: 0, width: 1710, height: 158)
+        // Full-screen Chrome: the toolbar window is in front of the page window.
+        expect(Rewards.coverRect(frontToBack: [toolbar, page]) == page)
+        // A picture-in-picture video in front.
+        let pip = CGRect(x: 1300, y: 800, width: 400, height: 225)
+        expect(Rewards.coverRect(frontToBack: [pip, page]) == page)
+        // Two ordinary windows: the front one.
+        let other = CGRect(x: 100, y: 100, width: 1200, height: 800)
+        expect(Rewards.coverRect(frontToBack: [other, page]) == other)
+        // Tiny helpers are never covered on their own.
+        expect(Rewards.coverRect(frontToBack: [CGRect(x: 0, y: 0, width: 50, height: 50)]) == nil)
+        expect(Rewards.coverRect(frontToBack: [toolbar]) == toolbar)
+    }
+
     func passCaps() {
         let taskID = UUID()
         var s = RewardsState()
@@ -1875,6 +1891,7 @@ let checks: [(String, () -> Void)] = [
     ("RewardsRules.matchingWhatsInFront", { RewardsRules().matchingWhatsInFront() }),
     ("RewardsRules.openWhenSignedInOrPassed", { RewardsRules().openWhenSignedInOrPassed() }),
     ("RewardsRules.passCaps", { RewardsRules().passCaps() }),
+    ("RewardsRules.coverTheMainWindow", { RewardsRules().coverTheMainWindow() }),
     ("RewardsRules.removingTakesADay", { RewardsRules().removingTakesADay() }),
     ("RewardsRules.wishlist", { RewardsRules().wishlist() }),
     ("RewardsRules.weeklyEarning", { RewardsRules().weeklyEarning() }),

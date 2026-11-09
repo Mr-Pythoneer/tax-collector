@@ -216,8 +216,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         if !quiet {
             let checkpoint = CheckpointController(model: model) { [weak self] item, leave in
                 guard let self else { return NSView() }
-                return NSHostingView(rootView: CheckpointView(item: item, onLeave: leave)
+                let hosting = NSHostingView(rootView: CheckpointView(item: item, onLeave: leave)
                     .environment(self.model).environment(self.router).environment(self.parentLink))
+                // The panel's size follows the window underneath; the content must not shrink it to its own height.
+                hosting.sizingOptions = []
+                return hosting
             }
             checkpoint.log = { [weak self] in self?.model.store.log($0) }
             self.checkpoint = checkpoint
@@ -249,7 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         }
         if env["TAXCOLLECTOR_SELFTEST"] == "1" {
             Task {
-                let report = await SelfTest.run(model: self.model)
+                let report = await SelfTest.run(model: self.model, checkpoint: self.checkpoint)
                 try? report.write(to: self.model.store.dir.appendingPathComponent("selftest.txt"), atomically: true, encoding: .utf8)
                 self.model.allowQuit = true
                 NSApp.terminate(nil)

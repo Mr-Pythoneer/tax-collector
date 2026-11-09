@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 // Credits, free time, the watchlist, research passes and the wishlist.
 // 1 credit = 30 minutes of free time. Credits are earned when a task's proof is accepted: more for
@@ -495,6 +496,15 @@ public enum Rewards {
             }
         }
         return nil
+    }
+
+    /// Which of an app's windows (front to back) the checkpoint covers: the frontmost one that's a real window,
+    /// skipping strips and small extras in front of it, like full-screen Chrome's separate toolbar window
+    /// or a picture-in-picture video. "Real" means at least a quarter of the app's biggest window.
+    public static func coverRect(frontToBack rects: [CGRect]) -> CGRect? {
+        let usable = rects.filter { $0.width >= 200 && $0.height >= 150 }
+        guard let biggest = usable.map({ $0.width * $0.height }).max() else { return nil }
+        return usable.first { $0.width * $0.height >= biggest / 4 }
     }
 
     /// Whether `item` is open right now without a checkpoint.

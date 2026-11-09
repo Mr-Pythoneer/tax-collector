@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import TaxCore
 
 /// Testing aid, only with `TAXCOLLECTOR_SELFTEST=1` and a throwaway `TAXCOLLECTOR_DATA_DIR`: runs the app's
@@ -6,7 +6,7 @@ import TaxCore
 /// Blackbaud, so it never touches your real accounts.
 @MainActor
 enum SelfTest {
-    static func run(model: AppModel) async -> String {
+    static func run(model: AppModel, checkpoint: CheckpointController? = nil) async -> String {
         // The lock tests start the enforcer. It must never close the real apps on this Mac.
         guard model.dryRun || !(model.enforcer.onlyTargets ?? []).isEmpty else {
             return "Refused: this copy would really close apps during the lock tests. Run it in test mode."
@@ -713,6 +713,13 @@ enum SelfTest {
                                    url: "https://m.youtube.com/shorts/1")
             check("rewards: YouTube in Chrome is matched", Rewards.match(front, watchlist: model.watchlist, isBrowser: true)?.id == yt.id)
             check("rewards: it gets a checkpoint while signed out", !Rewards.isOpen(yt, state: model.rewards, now: model.now))
+            if let checkpoint {
+                // Drawn in an invisible panel far off-screen: the checkpoint must fill the window it covers.
+                for size in [NSSize(width: 1400, height: 900), NSSize(width: 420, height: 320)] {
+                    let got = await checkpoint.panelSizeAfterLayout(item: yt, size: size)
+                    check("rewards: the checkpoint fills a \(Int(size.width))×\(Int(size.height)) window", got == size, "\(got)")
+                }
+            }
             _ = model.signIn()
             check("rewards: it's open while signed in", Rewards.isOpen(yt, state: model.rewards, now: model.now))
             model.signOut()
