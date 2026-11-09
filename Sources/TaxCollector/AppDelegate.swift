@@ -26,6 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     /// The self-test locks and unlocks a scratch copy many times; none of that should reach your screen.
     private var isSelfTest = false
     private(set) var parentLink: ParentLinkClient!
+    /// Puts the checkpoint over watched sites and apps.
+    private(set) var checkpoint: CheckpointController?
 
     private static let showNotification = Notification.Name(AppModel.label + ".show")
 
@@ -66,6 +68,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                 self.showBanner(self.model.dryRun ? "Test mode: would have closed \(name)" : "Closed \(name): a parent blocked it.")
             }
         }
+        model.onRewardsNotice = { [weak self] text in
+            self?.notify("Tax Collector", text)
+            self?.showBanner(text)
+        }
+        model.onRewardsChanged = { [weak self] in self?.checkpoint?.check() }
         model.onPaid = { [weak self] task in
             self?.notify("Proof accepted", Agenda.courseAndTitle(task).title)
         }
@@ -202,6 +209,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         }
 
         model.start()
+        if !quiet {
+            let checkpoint = CheckpointController(model: model) { [weak self] item, leave in
+                guard let self else { return NSView() }
+                return NSHostingView(rootView: CheckpointView(item: item, onLeave: leave)
+                    .environment(self.model).environment(self.router).environment(self.parentLink))
+            }
+            checkpoint.log = { [weak self] in self?.model.store.log($0) }
+            self.checkpoint = checkpoint
+            // The self-test checks the rules without covering your screen.
+            if !isSelfTest { checkpoint.start() }
+        }
         let startedAtLogin = CommandLine.arguments.contains("--launchd")
         if snapshotPath == nil && !quiet && (model.guardian == nil || !startedAtLogin) { showMain() }
         parentLink.start()
@@ -393,6 +411,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         if kind == "details", let task {
             content = AnyView(AssignmentDetailView(taskID: task.id))
             size = NSSize(width: 620, height: 660)
+        } else if kind == "rewards" {
+            let tab = RewardsView.Tab.allCases.first { $0.rawValue.lowercased() == spec.split(separator: ":").last?.lowercased() } ?? .wallet
+            content = AnyView(RewardsView(dismiss: {}, askGuardian: {}, tab: tab))
+            size = NSSize(width: 580, height: 640)
+        } else if kind == "checkpoint", let item = model.watchlist.first {
+            content = AnyView(CheckpointView(item: item, onLeave: {}))
+            size = NSSize(width: 900, height: 560)
         } else if kind == "main" {
             content = AnyView(MainView(openLockWindow: {}))
             size = NSSize(width: 680, height: 620)
@@ -634,11 +659,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private func refreshStatusItem() {
         guard let button = statusItem?.button, let model else { return }
         let locked = model.lock.isLocked
-        button.image = NSImage(systemSymbolName: locked ? "lock.fill" : "building.columns",
+        let freeTime = !locked && model.isSignedIn
+        button.image = NSImage(systemSymbolName: locked ? "lock.fill" : (freeTime ? "hourglass" : "building.columns"),
                                accessibilityDescription: "Tax Collector")
         button.imagePosition = .imageLeading
         var title = ""
-        if locked, let end = model.lock.penaltyEndsAt {
+        if freeTime {
+            title = "\(Credits.duration(model.freeTimeLeft)) left"
+        } else if locked, let end = model.lock.penaltyEndsAt {
             title = Fmt.span(end.timeIntervalSince(model.now))
         } else if !locked, let next = model.nextDue {
             let left = next.dueDate.timeIntervalSince(model.now)
@@ -659,6 +687,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         }
         menu.addItem(item("Open Tax Collector", #selector(menuOpen), key: "o"))
         menu.addItem(item("New Task…", #selector(menuNewTask), key: "n"))
+        menu.addItem(.separator())
+        let credits = NSMenuItem(title: "\(Credits.format(model.balance)) · \(Credits.duration(model.freeTimeLeft)) of free time",
+                                 action: nil, keyEquivalent: "")
+        credits.isEnabled = false
+        menu.addItem(credits)
+        if model.isSignedIn {
+            menu.addItem(item("Sign Out of Free Time", #selector(menuSignOut)))
+        } else if model.freeTimeLeft > 0 && !model.lock.isLocked {
+            menu.addItem(item("Sign In to Free Time", #selector(menuSignIn)))
+        }
+        menu.addItem(item("Rewards…", #selector(menuRewards)))
         menu.addItem(.separator())
         menu.addItem(item("Blackbaud…", #selector(menuBlackbaud)))
         menu.addItem(item("Teams…", #selector(menuTeams)))
@@ -698,6 +737,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     }
 
     @objc private func menuOpen() { showMain() }
+    @objc private func menuSignOut() { model.signOut() }
+    @objc private func menuSignIn() {
+        if let why = model.signIn() { showBanner(why) }
+    }
+    @objc private func menuRewards() {
+        showMain()
+        router.mainSheet = .rewards
+    }
     @objc private func menuPayUp() { showLockWindow() }
     @objc private func menuNewTask() {
         showMain()

@@ -12,6 +12,7 @@ enum Sheet: Identifiable, Equatable {
     case blackbaud
     case teams
     case extend(UUID)
+    case rewards
 
     var id: String {
         switch self {
@@ -25,6 +26,7 @@ enum Sheet: Identifiable, Equatable {
         case .blackbaud: "blackbaud"
         case .teams: "teams"
         case let .extend(id): "extend-\(id)"
+        case .rewards: "rewards"
         }
     }
 }
@@ -111,6 +113,14 @@ struct TaskListView: View {
                     Label("Teams", systemImage: "person.3")
                 }
                 .help("Microsoft Teams import")
+            }
+            ToolbarItem {
+                Button {
+                    router.mainSheet = .rewards
+                } label: {
+                    Label("Rewards", systemImage: "star.circle")
+                }
+                .help("Credits, free time, watchlist and wishlist")
             }
             ToolbarItem {
                 Button {
@@ -562,6 +572,7 @@ struct SheetContent: View {
         case .blackbaud: BlackbaudView(dismiss: dismiss, askGuardian: { present(.guardian) })
         case .teams: TeamsView(dismiss: dismiss, askGuardian: { present(.guardian) })
         case let .extend(id): ExtensionView(taskID: id, dismiss: dismiss)
+        case .rewards: RewardsView(dismiss: dismiss, askGuardian: { present(.guardian) })
         }
     }
 }

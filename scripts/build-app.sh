@@ -35,6 +35,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
     <key>CFBundleVersion</key><string>12</string>
+    <key>NSAppleEventsUsageDescription</key><string>Tax Collector reads the address of the tab in front, to put the checkpoint over sites on your watchlist. It doesn't change or close anything.</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
@@ -42,5 +43,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --sign - "$APP"
+# Signed with the local certificate when there is one (scripts/make-signing-cert.sh), so macOS keeps the
+# permissions you gave earlier builds. Otherwise ad hoc, and macOS asks again after each update.
+IDENTITY="Tax Collector Local Signing"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "\"$IDENTITY\""; then
+    codesign --force --sign "$IDENTITY" "$APP"
+else
+    codesign --force --sign - "$APP"
+fi
 echo "Built $APP"

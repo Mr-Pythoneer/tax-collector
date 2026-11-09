@@ -2,6 +2,8 @@
 
 A Mac menu-bar app that holds you to your own deadlines. Add a task and a due date. Before the deadline, pay with proof: a screenshot, photo or file. Claude checks that the proof really shows the task done. If nothing is accepted by the deadline, every app except your allowed ones gets closed until you pay.
 
+Finishing early earns credits. Spend them on free time for the sites and apps on your watchlist, or on things from your wishlist ([Rewards](#rewards-credits-the-watchlist-and-the-wishlist)).
+
 **[Download Tax Collector (.dmg)](https://github.com/Mr-Pythoneer/tax-collector/releases/latest/download/TaxCollector.dmg)** for Macs with Apple silicon (M1 or newer) and macOS 14 or later. It's the newest version; the steps to install it are [below](#install-from-the-disk-image) and inside the disk image, and so is [how to uninstall it](#uninstall).
 
 **Allowed during a lock:** every web browser (Safari, Chrome, Firefox, Edge, Brave, Arc, Opera, Vivaldi and others: some school sites only work in one of them), Claude, Word, Excel, PowerPoint, Outlook, OneNote, Teams, OneDrive, Mail, Zoom, VooV Meeting, Activity Monitor (plus Finder and a few system helpers).
@@ -124,7 +126,8 @@ Command Line Tools are enough; Xcode isn't needed.
 ```bash
 ./scripts/install.sh      # builds arm64, copies to ~/Applications, starts at login (LaunchAgent, KeepAlive)
 ./scripts/uninstall.sh    # add --purge to delete tasks and proofs too
-swift run taxcore-check   # logic checks (lock rule, edit window, clock guard, guardian hash, auditor parsing, iCal parser, Blackbaud and Teams sync)
+swift run taxcore-check   # logic checks (lock rule, edit window, clock guard, guardian hash, auditor parsing, iCal parser, Blackbaud and Teams sync, credits)
+./scripts/make-signing-cert.sh  # once: a local signing certificate, so macOS keeps the checkpoint's permissions across updates
 ```
 
 To try the install without touching the real one, set `TAXCOLLECTOR_LABEL` and `TAXCOLLECTOR_DEST` for `install.sh` and `uninstall.sh`. Other `TAXCOLLECTOR_*` variables are passed to the installed copy.
@@ -148,7 +151,7 @@ TAXCOLLECTOR_DATA_DIR=/tmp/tc-test TAXCOLLECTOR_DRY_RUN=1 "build.noindex/Tax Col
 - `TAXCOLLECTOR_DRY_RUN=1` logs which apps would be closed instead of closing them, and lets you quit normally. So does `TAXCOLLECTOR_ALLOW_QUIT=1`.
 - `TAXCOLLECTOR_ENFORCE_ONLY=com.apple.TextEdit,com.apple.calculator` makes a real lock close only those apps. This lets you test real closing without losing anything else you have open.
 - `TAXCOLLECTOR_SELFTEST=1` runs every feature through the app's own code with a fake Claude, a fake Blackbaud and a fake Teams. It writes `selftest.txt` and quits. Always use it with a throwaway `TAXCOLLECTOR_DATA_DIR`.
-- `TAXCOLLECTOR_TEST_SHEET=new|edit|proof|lastcheck|extend|details|guardian|blackbaud|auditor|log|lock`, optionally followed by `:part of a task title`, opens that screen at launch for screenshots.
+- `TAXCOLLECTOR_TEST_SHEET=new|edit|proof|lastcheck|extend|details|guardian|blackbaud|auditor|log|lock`, optionally followed by `:part of a task title`, opens that screen at launch for screenshots. With `TAXCOLLECTOR_TEST_SNAPSHOT`, `rewards:wallet|watchlist|wishlist` and `checkpoint` (over the first watchlist item) work too.
 - `TAXCOLLECTOR_TEST_QUIET=1` shows nothing at all (no windows, menu bar icon or notifications), for scripted tests.
 - `TAXCOLLECTOR_PARENT_SERVER` and `TAXCOLLECTOR_PARENT_SETUP` link a test copy to a relay. `TAXCOLLECTOR_TEST_PAIR=1` starts pairing and writes the code to `pairing-code.txt`, and `TAXCOLLECTOR_TEST_PAIR_AUTOCONFIRM=1` approves without the guardian code. `scripts/parent-link-e2e.sh` uses them: it runs the relay in `server/`, a quiet test copy and a fake phone (`scripts/fake-phone.mjs`) through every command, a replayed command and a forged signature.
 - `TAXCOLLECTOR_TEST_REPEAT=days:4` (or `weeks:2`) opens New Task with that repeat already filled in.
@@ -161,6 +164,43 @@ TAXCOLLECTOR_DATA_DIR=/tmp/tc-test TAXCOLLECTOR_DRY_RUN=1 "build.noindex/Tax Col
 - `TAXCOLLECTOR_BLACKBAUD_PROBE=1` opens the Blackbaud sign-in if needed, then writes `blackbaud-probe.json`: a read-only report of what Blackbaud's endpoints return, which assignment each imported task matches, and what one assignment's page holds (counts only). It saves only the fields the app uses, never cookies or tokens. Run this first when Blackbaud changes something.
 - `TAXCOLLECTOR_TEST_LAST_CHECK=<part of a title>` opens that paid task's last check, ticks everything and confirms it, just as your clicks would. **This really marks the assignment Completed in Blackbaud, or turns it in on Teams.** (With `TAXCOLLECTOR_TEST_TEAMS_JSON` set, a Teams turn-in is pretended instead.)
 - To test Blackbaud import without a real feed, put `"blackbaudURL": "file:///path/to/sample.ics"` in that folder's `settings.json`. The app polls it at launch.
+
+## Rewards: credits, the watchlist and the wishlist
+
+Tax Collector also pays you for doing work early. Open **Tax Collector → Rewards** (the star button in the toolbar, or **Rewards…** in the menu bar).
+
+**Earning credits.** When Claude accepts a task's proof, it also grades the work (0 to 100) and says how big it was (small, medium or large). The task then earns:
+
+> credits = size (1, 2 or 3) × grade ÷ 100 × timing
+
+- **Timing** is 1 if you send proof right after the task was set, and slides down to 0.25 at the deadline. Late work (anything that locked the Mac) earns nothing.
+- Example: a medium worksheet graded 90 earns 1.8 credits when done right after class, and about 0.5 if done in the last hour.
+- Each task pays once, for its first accepted proof. Excused tasks earn nothing, and a guardian approval counts as grade 70.
+- Timing uses the first deadline, so an extension doesn't earn more.
+- The guardian can change the earning rate (×0.5 to ×2).
+
+**Free time.** 1 credit = 30 minutes. Buy time in 15-minute steps; it goes into **time left**.
+
+- While you're **signed in**, everything on your watchlist is open and time left counts down. The menu bar shows how much is left.
+- **Sign out** whenever you like (menu bar, Rewards, or the checkpoint): the rest is kept for later, for anything on the watchlist. For example, buy an hour, watch 40 minutes of YouTube, sign out, and later play 20 minutes of a game.
+- You're signed out automatically when the time runs out (with a 1-minute warning), after 5 minutes with nothing from the watchlist in front, and when a lock starts.
+- During a lock, credits and free time can't be used.
+
+**The watchlist and the checkpoint.** Add websites (`youtube.com` covers its subdomains too) and apps (Steam, or Minecraft: start the game first and pick it from the running apps). When one comes to the front, a **checkpoint** covers its window. It never closes or hides anything; the page or game is just underneath. From the checkpoint you can:
+
+- **Use your time left**, or **buy time** and start right away.
+- **Say you need it for school**: pick the task and say why. Claude decides whether that task really needs this site or app, and for how many minutes (at most 60). A pass opens only that one site or app, costs nothing, and works during a lock too. At most 3 passes per task a day; every request and Claude's answer go in the activity log.
+- **Not now**, which takes you back to the app you were in.
+
+Adding to the watchlist is instant. Taking something off takes effect 24 hours later (or at once if you added it in the last 5 minutes, or with the guardian code), so you can't take YouTube off in the moment.
+
+**How sites are seen.** Safari and Chromium browsers (Chrome, Arc, Edge, Brave, Vivaldi, Opera) tell Tax Collector the address of the tab in front through AppleScript. macOS asks once per browser whether Tax Collector may control it; say OK, or sites in that browser aren't watched. Firefox, Zen and Tor don't give their address, so Tax Collector reads the window title instead ("… - YouTube"), which needs **Accessibility** for Tax Collector in System Settings. That's fuzzier.
+
+**Keeping those permissions across updates.** macOS ties them to how the app is signed. Run `./scripts/make-signing-cert.sh` once: it makes a "Tax Collector Local Signing" certificate in your login keychain and asks for your password to trust it for code signing. After that, `build-app.sh` signs every build with it and macOS remembers your answers. Without it, every update is signed ad hoc and macOS asks again.
+
+**The wishlist.** Add something you want with its real price. Claude prices it in credits, from what it costs and what you've actually been earning per week. When you have enough, **Buy** takes the credits and marks it **Bought: show a parent**. The guardian then marks it **Given**, or refunds it. The guardian can also set any price and add or take credits, with a note.
+
+**Wallet.** Your balance, time left and every credit in and out: what each task earned and why, free time, wishlist buys and the guardian's changes.
 
 ## Teams import
 
@@ -211,6 +251,8 @@ Everything lives in `~/Library/Application Support/TaxCollector/`:
 - `blackbaud.json`, which holds what the feed last said about each imported assignment and which ones you deleted
 - `blackbaud-session.plist`, which holds your Blackbaud sign-in so it survives restarts. It's readable only by your account, and **Sign out** deletes it.
 - `teams.json`, which holds what Teams last said about each imported assignment and which ones you deleted
+- `rewards.json`, which holds your credits (every move in and out), time left, the watchlist, school passes and the wishlist
+- `passes/` and `wishlist/`, which hold Claude's raw answers about school passes and wishlist prices
 - `teams-session.plist`, which holds your Microsoft sign-in cookies so Teams import survives restarts. It's readable only by your account, and **Sign Out of Teams** deletes it.
 - `guardian.json`, which holds only a salted PBKDF2 hash of the code
 - `parent-link.json`, which holds the server's address and setup code, this Mac's keys, and the paired phones. It's readable only by your account. A copy is kept in the app's preferences, so if the file is deleted, it comes back and the phones are told.
@@ -226,6 +268,7 @@ This is self-accountability, not parental-control software.
 - **During a lock**, Terminal, System Settings and text editors are closed, so those routes are blocked.
 - **Activity Monitor:** a plain Quit is refused. Force Quit works, but launchd restarts the app within about 2 seconds.
 - **With parents' phones paired**, these routes don't go unnoticed. The phones see when the app stops reporting, and when it restarts after its files or rules were changed. But someone who controls the server, or rebuilds the app, can still get around it. And it can't block websites: every web browser stays open during a lock (some school sites need one browser, some another), and so does everything in them. A parent can still shut one browser out from the phone's **Blocked apps**.
+- **The checkpoint covers, it doesn't stop.** Sound keeps playing underneath, and a browser that's neither Safari nor Chromium is only watched by its window title, and only with Accessibility allowed. Credits live in `rewards.json` on your Mac, like everything else, so this is accountability, not a vault.
 
 ## Blackbaud import
 

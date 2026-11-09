@@ -26,6 +26,9 @@ public struct ProofSubmission: Codable, Identifiable, Equatable, Sendable {
     public var reason: String
     /// When you last asked for it to be checked again, after a check that couldn't finish.
     public var recheckedAt: Date?
+    /// The auditor's grade (0-100) and how much work it was, for credits. nil in older answers.
+    public var grade: Int?
+    public var size: WorkSize?
 
     public init(id: UUID = UUID(), submittedAt: Date, note: String, attachments: [String],
                 verdict: Verdict? = nil, reason: String = "", recheckedAt: Date? = nil) {
@@ -259,6 +262,8 @@ public struct Settings: Codable, Equatable, Sendable {
     /// A parent's phone is paired. While it is, a missing guardian code doesn't reopen first-time setup.
     public var parentLinked: Bool
     public var parentMessage: ParentMessage?
+    /// Multiplies the credits earned (0.5 to 2). Only the guardian can change it.
+    public var earnRate: Double
 
     public init() {
         penaltyMinutes = 30
@@ -282,6 +287,7 @@ public struct Settings: Codable, Equatable, Sendable {
         appNames = [:]
         parentLinked = false
         parentMessage = nil
+        earnRate = 1
     }
 
     // Decode field by field so adding a setting later doesn't wipe saved ones.
@@ -309,5 +315,6 @@ public struct Settings: Codable, Equatable, Sendable {
         appNames = try c.decodeIfPresent([String: String].self, forKey: .appNames) ?? [:]
         parentLinked = try c.decodeIfPresent(Bool.self, forKey: .parentLinked) ?? false
         parentMessage = try c.decodeIfPresent(ParentMessage.self, forKey: .parentMessage)
+        earnRate = try c.decodeIfPresent(Double.self, forKey: .earnRate) ?? 1
     }
 }

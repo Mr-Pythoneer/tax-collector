@@ -66,6 +66,10 @@ final class AppModel {
     /// Attachments being downloaded, by attachment id.
     var downloading: Set<String> = []
     var setupError: String?
+    /// Credits, free time, the watchlist, passes and the wishlist.
+    var rewards: RewardsState
+    /// The watchlist item in front right now, if any (set by the checkpoint watcher).
+    var watchedInFront: WatchItem?
 
     @ObservationIgnored let enforcer: Enforcer
     @ObservationIgnored var onLockChange: (Bool) -> Void = { _ in }
@@ -109,6 +113,12 @@ final class AppModel {
     }
     @ObservationIgnored var lastTeamsAttempt: Date?
     @ObservationIgnored var lastTeamsLogged: String?
+    /// Something about credits worth a notification.
+    @ObservationIgnored var onRewardsNotice: (String) -> Void = { _ in }
+    /// Free time or the watchlist changed, so the checkpoint should look again.
+    @ObservationIgnored var onRewardsChanged: () -> Void = {}
+    @ObservationIgnored var lastRewardsTick: Date?
+    @ObservationIgnored var lastRewardsSave = Date.distantPast
 
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored var lastInboxScan = Date.distantPast
@@ -130,6 +140,7 @@ final class AppModel {
         blackbaud = store.loadBlackbaud()
         teams = store.loadTeams()
         recurring = store.loadRecurring()
+        rewards = store.loadRewards()
         enforcer = Enforcer(dryRun: dryRun)
         now = LockPolicy.effectiveNow(systemNow: Date(), lastSeen: settings.lastSeen)
 
@@ -216,6 +227,7 @@ final class AppModel {
             lockChanged()
         }
         updateEnforcer()
+        tickRewards()
         checkWarnings()
         pollFeedIfDue()
         pollTeamsIfDue()
@@ -433,15 +445,18 @@ final class AppModel {
                 return
             }
             self.record(verdict: outcome.verdict, reason: outcome.reason, checklist: outcome.checklist,
-                        taskID: taskID, submissionID: submissionID)
+                        grade: outcome.grade, size: outcome.size, taskID: taskID, submissionID: submissionID)
         }
     }
 
-    func record(verdict: Verdict, reason: String, checklist: [String] = [], taskID: UUID, submissionID: UUID) {
+    func record(verdict: Verdict, reason: String, checklist: [String] = [], grade: Int? = nil, size: WorkSize? = nil,
+                taskID: UUID, submissionID: UUID) {
         guard let ti = tasks.firstIndex(where: { $0.id == taskID }),
               let si = tasks[ti].proofs.firstIndex(where: { $0.id == submissionID }) else { return }
         tasks[ti].proofs[si].verdict = verdict
         tasks[ti].proofs[si].reason = reason
+        if grade != nil { tasks[ti].proofs[si].grade = grade }
+        if size != nil { tasks[ti].proofs[si].size = size }
         let accepted = verdict == .accepted || verdict == .guardianApproved
         // Keep the first checklist: you may already have ticked some of it.
         if tasks[ti].checklist == nil {
@@ -450,13 +465,16 @@ final class AppModel {
                 : checklist
             if !items.isEmpty { tasks[ti].checklist = items.map { ChecklistItem(text: $0) } }
         }
-        if accepted && tasks[ti].isPending {
+        let wasPending = tasks[ti].isPending
+        if accepted && wasPending {
             tasks[ti].status = LockPolicy.statusAfterAccepting(
                 tasks[ti], submittedAt: tasks[ti].proofs[si].submittedAt, acceptedAt: now,
                 penaltyMinutes: settings.penaltyMinutes)
         }
         save()
-        store.log("PROOF \(verdict.rawValue) for \"\(tasks[ti].title)\": \(reason)")
+        let graded = grade.map { ", grade \($0)\(size.map { ", \($0.rawValue)" } ?? "")" } ?? ""
+        store.log("PROOF \(verdict.rawValue) for \"\(tasks[ti].title)\"\(graded): \(reason)")
+        if accepted && wasPending { awardCredits(taskID: taskID, submissionID: submissionID) }
         if accepted { onPaid(tasks[ti]) }
         tick()
     }

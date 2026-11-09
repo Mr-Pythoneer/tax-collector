@@ -7,6 +7,8 @@ enum ProofVerifier {
         var verdict: Verdict
         var reason: String
         var checklist: [String] = []
+        var grade: Int? = nil
+        var size: WorkSize? = nil
     }
 
     static let timeout: TimeInterval = 180
@@ -88,7 +90,8 @@ enum ProofVerifier {
             return Outcome(verdict: .error, reason: problem.message)
         case let .success(data):
             let parsed = Auditor.parse(cliOutput: data)
-            return Outcome(verdict: parsed.verdict, reason: parsed.reason, checklist: parsed.checklist)
+            return Outcome(verdict: parsed.verdict, reason: parsed.reason, checklist: parsed.checklist,
+                           grade: parsed.grade, size: parsed.size)
         }
     }
 
@@ -108,6 +111,43 @@ enum ProofVerifier {
                 case let .success(data):
                     let answer = Auditor.parseExtension(cliOutput: data)
                     cont.resume(returning: (answer.decision, answer.hours, answer.reason))
+                }
+            }
+        }
+    }
+
+    /// Asks Claude whether a watched site or app may be used for a task, free.
+    static func decidePass(task: TaxTask, itemName: String, isSite: Bool, reason: String, minutesAlready: Int,
+                           folder: URL, settings: Settings, tokenFile: URL) async -> (PassDecision, Int, String) {
+        await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let prompt = Auditor.passPrompt(task: task, itemName: itemName, isSite: isSite, reason: reason,
+                                                minutesAlready: minutesAlready, now: Date())
+                switch runClaude(prompt: prompt, rules: Auditor.passRules, tools: "", folder: folder,
+                                 settings: settings, tokenFile: tokenFile) {
+                case let .failure(problem): cont.resume(returning: (.error, 0, problem.message))
+                case let .success(data):
+                    let answer = Auditor.parsePass(cliOutput: data)
+                    cont.resume(returning: (answer.decision, answer.minutes, answer.reason))
+                }
+            }
+        }
+    }
+
+    /// Asks Claude what a wishlist item should cost in credits.
+    static func priceWish(name: String, realPrice: String, note: String, weeklyEarning: Double?, folder: URL,
+                          settings: Settings, tokenFile: URL) async -> Result<(credits: Double, reason: String), Problem> {
+        await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let prompt = Auditor.pricePrompt(name: name, realPrice: realPrice, note: note, weeklyEarning: weeklyEarning)
+                switch runClaude(prompt: prompt, rules: Auditor.priceRules, tools: "", folder: folder,
+                                 settings: settings, tokenFile: tokenFile) {
+                case let .failure(problem): cont.resume(returning: .failure(problem))
+                case let .success(data):
+                    switch Auditor.parsePrice(cliOutput: data) {
+                    case let .success(price): cont.resume(returning: .success(price))
+                    case let .failure(problem): cont.resume(returning: .failure(Problem(message: problem.message)))
+                    }
                 }
             }
         }

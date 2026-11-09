@@ -1561,7 +1561,307 @@ struct TeamsTurnIn {
     }
 }
 
+struct RewardsRules {
+    private func accepted(at offset: TimeInterval, grade: Int? = 90, size: WorkSize? = .medium,
+                          verdict: Verdict = .accepted) -> ProofSubmission {
+        var p = ProofSubmission(submittedAt: t0.addingTimeInterval(offset), note: "", attachments: [], verdict: verdict)
+        p.grade = grade
+        p.size = size
+        return p
+    }
+
+    func earlierEarnsMore() {
+        // Set 72 h before t0, due at t0.
+        var t = task(due: 0)
+        let early = accepted(at: -hours(72))
+        t.status = .proven(at: early.submittedAt)
+        let e = Rewards.earning(task: t, proof: early, earnRate: 1)
+        expect(e?.credits == 1.8)            // 2 × 0.9 × 1.0
+        let lastMinute = accepted(at: -60)
+        let l = Rewards.earning(task: t, proof: lastMinute, earnRate: 1)
+        expect(l?.credits == 0.5)  // 2 × 0.9 × ~0.25
+        let half = Rewards.earning(task: t, proof: accepted(at: -hours(36)), earnRate: 1)
+        expect(half != nil && half!.credits > l!.credits && half!.credits < e!.credits)
+    }
+
+    func lateAndExcusedEarnNothing() {
+        var t = task(due: 0)
+        let late = accepted(at: 60)
+        t.status = .provenLate(at: late.submittedAt, penaltyEndsAt: t0.addingTimeInterval(3600))
+        expect(Rewards.earning(task: t, proof: late, earnRate: 1) == nil)
+        t.status = .excused(at: t0)
+        expect(Rewards.earning(task: t, proof: accepted(at: -hours(70)), earnRate: 1) == nil)
+        // Submitted after the deadline but accepted as on time can't happen; timing alone gives 0 too.
+        expect(Rewards.timing(createdAt: t0.addingTimeInterval(-hours(5)), due: t0, submittedAt: t0.addingTimeInterval(1)) == 0)
+        // Rejected proof earns nothing.
+        var rejected = accepted(at: -hours(70))
+        rejected.verdict = .rejected
+        expect(Rewards.earning(task: task(due: 0), proof: rejected, earnRate: 1) == nil)
+    }
+
+    func guardianAndMissingGrades() {
+        let t = task(due: 0)
+        let g = Rewards.earning(task: t, proof: accepted(at: -hours(72), grade: nil, size: nil, verdict: .guardianApproved), earnRate: 1)
+        expect(g?.grade == 70 && g?.size == .medium && g?.credits == 1.4)
+        let old = Rewards.earning(task: t, proof: accepted(at: -hours(72), grade: nil, size: nil), earnRate: 1)
+        expect(old?.grade == 70)
+        let big = Rewards.earning(task: t, proof: accepted(at: -hours(72), grade: 100, size: .large), earnRate: 2)
+        expect(big?.credits == 6)
+        // The rate is clamped.
+        let clamped = Rewards.earning(task: t, proof: accepted(at: -hours(72), grade: 100, size: .small), earnRate: 10)
+        expect(clamped?.credits == 2)
+    }
+
+    func extensionsDontFarmCredits() {
+        var t = task(due: hours(12))
+        t.extensions = [Extension(requestedAt: t0.addingTimeInterval(-hours(1)), hoursAsked: 12, reason: "sick",
+                                  decision: .granted, hoursGranted: 12, previousDue: t0)]
+        expect(Rewards.originalDue(t) == t0)
+        // Submitted after the original deadline, inside the extension: counts as the last moment, not early.
+        let e = Rewards.earning(task: t, proof: accepted(at: hours(1)), earnRate: 1)
+        expect(e == nil)
+    }
+
+    func shortWindowsAreMeasuredOverAnHour() {
+        // Made 10 minutes before it's due, sent 5 minutes before.
+        let timing = Rewards.timing(createdAt: t0.addingTimeInterval(-600), due: t0, submittedAt: t0.addingTimeInterval(-300))
+        expect(timing < 0.4)
+    }
+
+    func ledgerAndBuyingTime() {
+        var s = RewardsState()
+        s.ledger.append(LedgerEntry(at: t0, amount: 1.8, kind: .earned, note: "x"))
+        expect(Rewards.buyTime(&s, credits: 0.3, locked: false, now: t0) == .badAmount)
+        expect(Rewards.buyTime(&s, credits: 2, locked: false, now: t0) == .notEnoughCredits)
+        expect(Rewards.buyTime(&s, credits: 1, locked: true, now: t0) == .locked)
+        expect(Rewards.buyTime(&s, credits: 1.5, locked: false, now: t0) == nil)
+        expect(s.balance == 0.3)
+        expect(s.freeTime.secondsLeft == 45 * 60)
+        expect(Rewards.signIn(&s, locked: true, now: t0) == .locked)
+        expect(Rewards.signIn(&s, locked: false, now: t0) == nil && s.freeTime.isSignedIn)
+    }
+
+    func clockSignOutAndKeepTheRest() {
+        var s = RewardsState(freeTime: FreeTime(secondsLeft: 60 * 60))
+        _ = Rewards.signIn(&s, locked: false, now: t0)
+        var now = t0
+        for _ in 0..<(40 * 60) {
+            now = now.addingTimeInterval(1)
+            _ = Rewards.tick(&s, elapsed: 1, watchedInFront: true, locked: false, now: now)
+        }
+        expect(abs(s.freeTime.secondsLeft - 20 * 60) < 0.5)
+        Rewards.signOut(&s)
+        // Signed out: the clock doesn't move.
+        expect(Rewards.tick(&s, elapsed: 1, watchedInFront: true, locked: false, now: now.addingTimeInterval(1)) == nil)
+        expect(abs(s.freeTime.secondsLeft - 20 * 60) < 0.5)
+        // A sleeping Mac doesn't eat the time: one tick counts at most a few seconds.
+        _ = Rewards.signIn(&s, locked: false, now: now)
+        _ = Rewards.tick(&s, elapsed: 3600, watchedInFront: true, locked: false, now: now.addingTimeInterval(2))
+        expect(s.freeTime.secondsLeft >= 20 * 60 - Rewards.maxTick - 0.5)
+    }
+
+    func autoSignOuts() {
+        var s = RewardsState(freeTime: FreeTime(secondsLeft: 90))
+        _ = Rewards.signIn(&s, locked: false, now: t0)
+        var events: [Rewards.TickEvent] = []
+        var now = t0
+        for _ in 0..<100 {
+            now = now.addingTimeInterval(1)
+            if let e = Rewards.tick(&s, elapsed: 1, watchedInFront: true, locked: false, now: now) { events.append(e) }
+        }
+        expect(events == [.warnOneMinute, .ranOut])
+        expect(!s.freeTime.isSignedIn && s.freeTime.secondsLeft == 0)
+
+        var idle = RewardsState(freeTime: FreeTime(secondsLeft: 3600))
+        _ = Rewards.signIn(&idle, locked: false, now: t0)
+        expect(Rewards.tick(&idle, elapsed: 1, watchedInFront: false, locked: false, now: t0.addingTimeInterval(299)) == nil)
+        expect(Rewards.tick(&idle, elapsed: 1, watchedInFront: false, locked: false, now: t0.addingTimeInterval(301)) == .idleSignedOut)
+        expect(!idle.freeTime.isSignedIn && idle.freeTime.secondsLeft > 3500)
+
+        var locked = RewardsState(freeTime: FreeTime(secondsLeft: 3600))
+        _ = Rewards.signIn(&locked, locked: false, now: t0)
+        expect(Rewards.tick(&locked, elapsed: 1, watchedInFront: true, locked: true, now: t0.addingTimeInterval(1)) == .lockSignedOut)
+        expect(locked.freeTime.secondsLeft == 3600)
+    }
+
+    func domains() {
+        expect(Rewards.normalizeDomain("https://www.YouTube.com/watch?v=1") == "youtube.com")
+        expect(Rewards.normalizeDomain(" music.youtube.com ") == "music.youtube.com")
+        expect(Rewards.normalizeDomain("youtube") == nil)
+        expect(Rewards.normalizeDomain("you tube.com") == nil)
+        expect(Rewards.siteMatches(domain: "youtube.com", url: "https://m.youtube.com/watch?v=x"))
+        expect(Rewards.siteMatches(domain: "youtube.com", url: "https://youtube.com/"))
+        expect(!Rewards.siteMatches(domain: "youtube.com", url: "https://notyoutube.com/"))
+        expect(!Rewards.siteMatches(domain: "youtube.com", url: "https://docs.google.com/?q=youtube.com"))
+        expect(!Rewards.siteMatches(domain: "youtube.com", url: "file:///youtube.com"))
+        expect(Rewards.siteMatches(domain: "youtube.com", title: "Cats - YouTube — Mozilla Firefox"))
+        expect(!Rewards.siteMatches(domain: "youtube.com", title: "My essay - Google Docs"))
+    }
+
+    func matchingWhatsInFront() {
+        let yt = WatchItem(target: .site(domain: "youtube.com"), addedAt: t0)
+        let steam = WatchItem(target: .app(id: "com.valvesoftware.steam", name: "Steam"), addedAt: t0)
+        let mc = WatchItem(target: .app(id: Rewards.appID(bundleID: nil, processName: "java"), name: "Minecraft"), addedAt: t0)
+        let list = [yt, steam, mc]
+        let chrome = FrontThing(bundleID: "com.google.Chrome", appName: "Google Chrome", processName: "Google Chrome",
+                                url: "https://www.youtube.com/watch?v=1")
+        expect(Rewards.match(chrome, watchlist: list, isBrowser: true) == yt)
+        var docs = chrome
+        docs.url = "https://docs.google.com/document/d/1"
+        expect(Rewards.match(docs, watchlist: list, isBrowser: true) == nil)
+        // A site never matches in an app that isn't a browser.
+        expect(Rewards.match(chrome, watchlist: list, isBrowser: false) == nil)
+        expect(Rewards.match(FrontThing(bundleID: "com.valvesoftware.steam", appName: "Steam", processName: "steam_osx"),
+                             watchlist: list, isBrowser: false) == steam)
+        expect(Rewards.match(FrontThing(bundleID: nil, appName: "java", processName: "java"), watchlist: list, isBrowser: false) == mc)
+    }
+
+    func openWhenSignedInOrPassed() {
+        let yt = WatchItem(target: .site(domain: "youtube.com"), addedAt: t0)
+        var s = RewardsState(watchlist: [yt])
+        expect(!Rewards.isOpen(yt, state: s, now: t0))
+        s.passes.append(ResearchPass(itemID: yt.id, itemName: "youtube.com", taskID: UUID(), taskTitle: "Essay",
+                                     reason: "video", askedAt: t0, decision: .granted, minutes: 20,
+                                     until: t0.addingTimeInterval(20 * 60)))
+        expect(Rewards.isOpen(yt, state: s, now: t0.addingTimeInterval(60)))
+        expect(!Rewards.isOpen(yt, state: s, now: t0.addingTimeInterval(21 * 60)))
+        s.freeTime = FreeTime(secondsLeft: 600, signedInAt: t0)
+        expect(Rewards.isOpen(yt, state: s, now: t0.addingTimeInterval(21 * 60)))
+    }
+
+    func passCaps() {
+        let taskID = UUID()
+        var s = RewardsState()
+        for n in 0..<3 {
+            expect(Rewards.canAskPass(taskID: taskID, state: s, now: t0) == nil)
+            s.passes.append(ResearchPass(itemID: UUID(), itemName: "x", taskID: taskID, taskTitle: "t", reason: "r",
+                                         askedAt: t0.addingTimeInterval(TimeInterval(n)), decision: .denied))
+        }
+        expect(Rewards.canAskPass(taskID: taskID, state: s, now: t0) == .tooManyPasses)
+        expect(Rewards.canAskPass(taskID: UUID(), state: s, now: t0) == nil)
+        expect(Rewards.canAskPass(taskID: taskID, state: s, now: t0.addingTimeInterval(25 * 3600)) == nil)
+        // Ones that couldn't be decided don't count.
+        var e = RewardsState()
+        for _ in 0..<5 {
+            e.passes.append(ResearchPass(itemID: UUID(), itemName: "x", taskID: taskID, taskTitle: "t", reason: "r",
+                                         askedAt: t0, decision: .error))
+        }
+        expect(Rewards.canAskPass(taskID: taskID, state: e, now: t0) == nil)
+    }
+
+    func removingTakesADay() {
+        var s = RewardsState()
+        let item = Rewards.add(.site(domain: "youtube.com"), to: &s, now: t0)!
+        expect(Rewards.add(.site(domain: "youtube.com"), to: &s, now: t0) == nil && s.watchlist.count == 1)
+        // Just added: can be taken off at once.
+        expect(Rewards.remove(item.id, from: &s, guardian: false, now: t0.addingTimeInterval(60)) == .removed)
+        let again = Rewards.add(.site(domain: "youtube.com"), to: &s, now: t0)!
+        let later = t0.addingTimeInterval(3600)
+        expect(Rewards.remove(again.id, from: &s, guardian: false, now: later) == .scheduled(at: later.addingTimeInterval(24 * 3600)))
+        // Asking twice doesn't push it back.
+        expect(Rewards.remove(again.id, from: &s, guardian: false, now: later.addingTimeInterval(600))
+               == .scheduled(at: later.addingTimeInterval(24 * 3600)))
+        expect(Rewards.pruneRemovals(&s, now: later.addingTimeInterval(23 * 3600)).isEmpty && s.watchlist.count == 1)
+        expect(Rewards.pruneRemovals(&s, now: later.addingTimeInterval(24 * 3600)) == ["youtube.com"] && s.watchlist.isEmpty)
+        // The guardian takes it off now.
+        let third = Rewards.add(.site(domain: "youtube.com"), to: &s, now: t0)!
+        expect(Rewards.remove(third.id, from: &s, guardian: true, now: later) == .removed && s.watchlist.isEmpty)
+        // Adding it again cancels a pending removal.
+        let fourth = Rewards.add(.site(domain: "steam.com"), to: &s, now: t0)!
+        _ = Rewards.remove(fourth.id, from: &s, guardian: false, now: later)
+        _ = Rewards.add(.site(domain: "steam.com"), to: &s, now: later)
+        expect(s.watchlist.first?.removeAt == nil)
+    }
+
+    func wishlist() {
+        var s = RewardsState()
+        s.ledger.append(LedgerEntry(at: t0, amount: 10, kind: .earned, note: "x"))
+        var w = WishItem(name: "Game", realPrice: "$20", addedAt: t0)
+        s.wishes.append(w)
+        expect(Rewards.buy(w.id, state: &s, locked: false, now: t0) == .badAmount)   // not priced yet
+        s.wishes[0].credits = 12
+        s.wishes[0].state = .priced
+        expect(Rewards.buy(w.id, state: &s, locked: false, now: t0) == .notEnoughCredits)
+        s.wishes[0].credits = 8
+        expect(Rewards.buy(w.id, state: &s, locked: true, now: t0) == .locked)
+        expect(Rewards.buy(w.id, state: &s, locked: false, now: t0) == nil)
+        expect(s.balance == 2)
+        expect(Rewards.buy(w.id, state: &s, locked: false, now: t0) == .badAmount)   // already bought
+        Rewards.settle(w.id, given: false, state: &s, now: t0)
+        expect(s.balance == 10)
+        if case .refunded = s.wishes[0].state {} else { expect(false) }
+        w = WishItem(name: "Snack", realPrice: "$2", addedAt: t0, credits: 2, state: .priced)
+        s.wishes.append(w)
+        _ = Rewards.buy(w.id, state: &s, locked: false, now: t0)
+        Rewards.settle(w.id, given: true, state: &s, now: t0)
+        expect(s.balance == 8)
+        if case .given = s.wishes[1].state {} else { expect(false) }
+    }
+
+    func weeklyEarning() {
+        var s = RewardsState()
+        expect(Rewards.weeklyEarning(s, now: t0) == nil)
+        s.ledger.append(LedgerEntry(at: t0.addingTimeInterval(-14 * 24 * 3600), amount: 10, kind: .earned, note: "a"))
+        s.ledger.append(LedgerEntry(at: t0.addingTimeInterval(-1 * 24 * 3600), amount: 10, kind: .earned, note: "b"))
+        s.ledger.append(LedgerEntry(at: t0, amount: -5, kind: .freeTime, note: "spent"))
+        expect(Rewards.weeklyEarning(s, now: t0) == 10)
+    }
+
+    func auditorGradesAndAnswers() {
+        let a = Auditor.parseVerdict(#"{"verdict":"accept","reason":"Good.","grade":"85","size":"Large","checklist":[]}"#)
+        expect(a.verdict == .accepted && a.grade == 85 && a.size == .large)
+        let old = Auditor.parseVerdict(#"{"verdict":"accept","reason":"Good."}"#)
+        expect(old.grade == nil && old.size == nil)
+        let wild = Auditor.parseVerdict(#"{"verdict":"accept","reason":"x","grade":400,"size":"huge"}"#)
+        expect(wild.grade == 100 && wild.size == nil)
+        func cli(_ text: String) -> Data {
+            try! JSONSerialization.data(withJSONObject: ["type": "result", "is_error": false, "result": text])
+        }
+        let pass = Auditor.parsePass(cliOutput: cli(#"Sure: {"decision":"grant","minutes":500,"reason":"Assigned video."}"#))
+        expect(pass.decision == .granted && pass.minutes == 60)
+        expect(Auditor.parsePass(cliOutput: cli(#"{"decision":"grant","minutes":0,"reason":"x"}"#)).decision == .denied)
+        expect(Auditor.parsePass(cliOutput: cli(#"{"decision":"deny","minutes":30,"reason":"x"}"#)).minutes == 0)
+        expect(Auditor.parsePass(cliOutput: Data("nope".utf8)).decision == .error)
+        if case let .success(price) = Auditor.parsePrice(cliOutput: cli(#"{"credits":24.4,"reason":"About two weeks."}"#)) {
+            expect(price.credits == 24)
+        } else { expect(false) }
+        if case .success = Auditor.parsePrice(cliOutput: cli(#"{"credits":-3}"#)) { expect(false) }
+        if case let .success(price) = Auditor.parsePrice(cliOutput: cli(#"{"credits":0.2,"reason":"x"}"#)) {
+            expect(price.credits == 1)
+        } else { expect(false) }
+    }
+
+    func olderFilesStillLoad() {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let state = try? decoder.decode(RewardsState.self, from: Data(#"{"ledger":[]}"#.utf8))
+        expect(state != nil && state!.watchlist.isEmpty && state!.freeTime.secondsLeft == 0)
+        let settings = try? decoder.decode(Settings.self, from: Data(#"{"penaltyMinutes":10}"#.utf8))
+        expect(settings?.earnRate == 1)
+        let proof = try? decoder.decode(ProofSubmission.self, from: Data(
+            #"{"id":"6C3F7A0E-2B7B-4C55-9C51-3A8E4F2B9D11","submittedAt":"2027-01-01T00:00:00Z","note":"","attachments":[],"reason":""}"#.utf8))
+        expect(proof != nil && proof?.grade == nil)
+    }
+}
+
 let checks: [(String, () -> Void)] = [
+    ("RewardsRules.earlierEarnsMore", { RewardsRules().earlierEarnsMore() }),
+    ("RewardsRules.lateAndExcusedEarnNothing", { RewardsRules().lateAndExcusedEarnNothing() }),
+    ("RewardsRules.guardianAndMissingGrades", { RewardsRules().guardianAndMissingGrades() }),
+    ("RewardsRules.extensionsDontFarmCredits", { RewardsRules().extensionsDontFarmCredits() }),
+    ("RewardsRules.shortWindowsAreMeasuredOverAnHour", { RewardsRules().shortWindowsAreMeasuredOverAnHour() }),
+    ("RewardsRules.ledgerAndBuyingTime", { RewardsRules().ledgerAndBuyingTime() }),
+    ("RewardsRules.clockSignOutAndKeepTheRest", { RewardsRules().clockSignOutAndKeepTheRest() }),
+    ("RewardsRules.autoSignOuts", { RewardsRules().autoSignOuts() }),
+    ("RewardsRules.domains", { RewardsRules().domains() }),
+    ("RewardsRules.matchingWhatsInFront", { RewardsRules().matchingWhatsInFront() }),
+    ("RewardsRules.openWhenSignedInOrPassed", { RewardsRules().openWhenSignedInOrPassed() }),
+    ("RewardsRules.passCaps", { RewardsRules().passCaps() }),
+    ("RewardsRules.removingTakesADay", { RewardsRules().removingTakesADay() }),
+    ("RewardsRules.wishlist", { RewardsRules().wishlist() }),
+    ("RewardsRules.weeklyEarning", { RewardsRules().weeklyEarning() }),
+    ("RewardsRules.auditorGradesAndAnswers", { RewardsRules().auditorGradesAndAnswers() }),
+    ("RewardsRules.olderFilesStillLoad", { RewardsRules().olderFilesStillLoad() }),
     ("MatchRules.movedDeadlineStillMatches", { MatchRules().movedDeadlineStillMatches() }),
     ("RepeatRules.nextDueFindsTheRightDay", { RepeatRules().nextDueFindsTheRightDay() }),
     ("RepeatRules.oneCopyAtATime", { RepeatRules().oneCopyAtATime() }),

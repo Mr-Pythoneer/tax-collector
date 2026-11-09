@@ -644,6 +644,125 @@ enum SelfTest {
             model.tick()
         }
 
+        // Rewards: credits, free time, the watchlist, passes and the wishlist
+        do {
+            model.tick()
+            if model.lock.isLocked {
+                for t in model.lock.overdue { model.excuse(t.id) }
+                model.settings.parentLock = nil
+                model.tick()
+            }
+            check("rewards: nothing is locked before the rewards tests", !model.lock.isLocked)
+            let graded = fakeClaude("claude-graded", #"{"verdict":"accept","reason":"Careful work.","grade":90,"size":"large","checklist":["All of it"]}"#)
+            let before = model.balance
+            let early = await submit("Rewards early", claude: graded)
+            let earned = model.rewards.ledger.last { $0.kind == .earned && $0.taskID == early?.id }
+            check("rewards: an early, graded proof earns credits", earned.map { abs($0.amount - 2.7) < 0.11 } ?? false,
+                  "\(String(describing: earned?.amount))")
+            check("rewards: the grade and size are kept on the proof",
+                  early?.proofs.last?.grade == 90 && early?.proofs.last?.size == .large)
+            check("rewards: the balance went up", abs(model.balance - before - (earned?.amount ?? -99)) < 0.01)
+            if let early {
+                model.settings.claudePath = graded
+                model.submitProof(taskID: early.id, note: "again", files: [proofFile])
+                _ = await wait(8) { model.task(early.id)?.proofs.last?.verdict != nil }
+                check("rewards: a task only pays once", model.rewards.ledger.filter { $0.kind == .earned && $0.taskID == early.id }.count == 1)
+            }
+            // Late work earns nothing.
+            model.settings.claudePath = graded
+            model.addTask(title: "Rewards late", details: "x", due: Date().addingTimeInterval(3))
+            if let late = newest("Rewards late") {
+                _ = await wait(6) { model.tick(); return model.lock.isLocked }
+                model.submitProof(taskID: late.id, note: "late", files: [proofFile])
+                _ = await wait { model.task(late.id)?.proofs.last?.verdict != nil }
+                check("rewards: late work earns nothing", !model.rewards.hasEarned(taskID: late.id))
+                check("rewards: free time can't be bought during a penalty", model.buyTime(credits: 0.5) != nil)
+                model.excuse(late.id)
+                model.settings.penaltyMinutes = 30
+                if let i = model.tasks.firstIndex(where: { $0.id == late.id }) { model.tasks[i].status = .excused(at: model.now) }
+                model.tick()
+            }
+            check("rewards: the lock is over again", !model.lock.isLocked)
+
+            // Free time
+            model.adjustCredits(5, note: "Self test")
+            let bal = model.balance
+            check("rewards: free time comes in 15-minute steps", model.buyTime(credits: 0.3) != nil)
+            check("rewards: buying 30 minutes", model.buyTime(credits: 1) == nil && abs(model.balance - (bal - 1)) < 0.01
+                  && model.freeTimeLeft >= 30 * 60 - 1)
+            check("rewards: signing in", model.signIn() == nil && model.isSignedIn)
+            let left = model.freeTimeLeft
+            await pause(2.2)
+            check("rewards: time left counts down while signed in", model.freeTimeLeft < left - 1)
+            model.signOut()
+            let kept = model.freeTimeLeft
+            await pause(1.5)
+            check("rewards: signing out keeps the rest", !model.isSignedIn && model.freeTimeLeft == kept)
+
+            // Watchlist
+            check("rewards: a bad site is refused", model.addSite("not a site") != nil)
+            check("rewards: a site is added", model.addSite("https://www.youtube.com/watch?v=1") == nil
+                  && model.watchlist.contains { $0.target == .site(domain: "youtube.com") })
+            _ = model.addApp(id: "com.apple.TextEdit", name: "TextEdit")
+            let yt = model.watchlist.first { $0.target == .site(domain: "youtube.com") }!
+            let front = FrontThing(bundleID: "com.google.Chrome", appName: "Google Chrome", processName: "Google Chrome",
+                                   url: "https://m.youtube.com/shorts/1")
+            check("rewards: YouTube in Chrome is matched", Rewards.match(front, watchlist: model.watchlist, isBrowser: true)?.id == yt.id)
+            check("rewards: it gets a checkpoint while signed out", !Rewards.isOpen(yt, state: model.rewards, now: model.now))
+            _ = model.signIn()
+            check("rewards: it's open while signed in", Rewards.isOpen(yt, state: model.rewards, now: model.now))
+            model.signOut()
+            if let i = model.rewards.watchlist.firstIndex(where: { $0.id == yt.id }) {
+                model.rewards.watchlist[i].addedAt = model.now.addingTimeInterval(-3600)
+            }
+            if case .scheduled = model.removeWatch(yt.id) { check("rewards: taking a site off waits 24 hours", true) }
+            else { check("rewards: taking a site off waits 24 hours", false) }
+            check("rewards: it's still watched meanwhile", model.watchlist.contains { $0.id == yt.id })
+            model.keepWatching(yt.id)
+
+            // School pass
+            model.addTask(title: "Rewards research", details: "Watch the assigned lecture on cells.", due: Date().addingTimeInterval(86400))
+            if let r = newest("Rewards research") {
+                func fakePass(_ name: String, _ inner: String) -> String { fakeClaude(name, inner) }
+                model.settings.claudePath = fakePass("claude-pass-grant", #"{"decision":"grant","minutes":25,"reason":"The lecture is on YouTube."}"#)
+                check("rewards: a pass needs a reason", model.askPass(itemID: yt.id, taskID: r.id, reason: "school") != nil)
+                check("rewards: a pass is asked", model.askPass(itemID: yt.id, taskID: r.id, reason: "The teacher assigned a YouTube lecture on cells.") == nil)
+                _ = await wait { model.latestPass(itemID: yt.id)?.decision != nil }
+                check("rewards: Claude grants a pass", model.latestPass(itemID: yt.id)?.decision == .granted
+                      && model.latestPass(itemID: yt.id)?.minutes == 25)
+                check("rewards: a granted pass opens only that site", Rewards.isOpen(yt, state: model.rewards, now: model.now)
+                      && model.watchlist.first { $0.name == "TextEdit" }.map { !Rewards.isOpen($0, state: model.rewards, now: model.now) } == true)
+                model.settings.claudePath = fakePass("claude-pass-deny", #"{"decision":"deny","minutes":0,"reason":"That's not for the task."}"#)
+                _ = model.askPass(itemID: yt.id, taskID: r.id, reason: "I want to watch some videos after this.")
+                _ = await wait { model.latestPass(itemID: yt.id)?.decision != nil }
+                check("rewards: Claude can say no", model.latestPass(itemID: yt.id)?.decision == .denied)
+                _ = model.askPass(itemID: yt.id, taskID: r.id, reason: "Another video from the same teacher.")
+                _ = await wait { model.latestPass(itemID: yt.id)?.decision != nil }
+                check("rewards: at most 3 passes per task a day",
+                      model.askPass(itemID: yt.id, taskID: r.id, reason: "One more video from the teacher please.") != nil)
+                _ = model.delete(r.id, guardianApproved: true)
+            }
+
+            // Wishlist
+            model.settings.claudePath = fakeClaude("claude-price", #"{"credits":12,"reason":"About a week of good work."}"#)
+            check("rewards: a wish needs a price", model.addWish(name: "Headphones", realPrice: "", note: "") != nil)
+            _ = model.addWish(name: "Headphones", realPrice: "$25", note: "")
+            let wish = model.rewards.wishes.last!
+            _ = await wait { model.rewards.wishes.last?.state != .pricing }
+            check("rewards: Claude prices a wish", model.rewards.wishes.last?.credits == 12 && model.rewards.wishes.last?.state == .priced)
+            model.adjustCredits(20, note: "Self test")
+            let beforeWish = model.balance
+            check("rewards: buying a wish takes its credits", model.buyWish(wish.id) == nil && abs(model.balance - (beforeWish - 12)) < 0.01)
+            model.settleWish(wish.id, given: false)
+            check("rewards: a refund gives them back", abs(model.balance - beforeWish) < 0.01)
+            model.settings.claudePath = realClaude
+            let onDisk = model.store.loadRewards()
+            // Dates are saved to the second, so compare what matters.
+            check("rewards: everything is saved", onDisk.ledger.map(\.id) == model.rewards.ledger.map(\.id)
+                  && onDisk.balance == model.balance && onDisk.watchlist.map(\.id) == model.watchlist.map(\.id)
+                  && onDisk.passes.map(\.id) == model.rewards.passes.map(\.id) && onDisk.wishes.map(\.id) == model.rewards.wishes.map(\.id))
+        }
+
         // Everything ends up on disk
         let saved = model.store.loadTasks()
         check("storage: tasks on disk match the app", Set(saved.map(\.id)) == Set(model.tasks.map(\.id)))

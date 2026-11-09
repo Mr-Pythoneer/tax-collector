@@ -22,6 +22,7 @@ public final class Store {
     private var blackbaudURL: URL { dir.appendingPathComponent("blackbaud.json") }
     private var recurringURL: URL { dir.appendingPathComponent("recurring.json") }
     private var teamsURL: URL { dir.appendingPathComponent("teams.json") }
+    private var rewardsURL: URL { dir.appendingPathComponent("rewards.json") }
     public var linkURL: URL { dir.appendingPathComponent("parent-link.json") }
     public var logURL: URL { dir.appendingPathComponent("events.log") }
     /// Where other tools on this Mac drop tasks for Tax Collector to pick up (see Inbox.swift).
@@ -42,6 +43,9 @@ public final class Store {
 
     public func loadTeams() -> TeamsState { load(TeamsState.self, from: teamsURL) ?? TeamsState() }
     public func saveTeams(_ state: TeamsState) { save(state, to: teamsURL) }
+
+    public func loadRewards() -> RewardsState { load(RewardsState.self, from: rewardsURL) ?? RewardsState() }
+    public func saveRewards(_ state: RewardsState) { save(state, to: rewardsURL) }
 
     public func loadRecurring() -> [RecurringTask] { load([RecurringTask].self, from: recurringURL) ?? [] }
     public func saveRecurring(_ series: [RecurringTask]) { save(series, to: recurringURL) }

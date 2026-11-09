@@ -91,6 +91,7 @@ private struct GuardianPanel: View {
                 tasksSection
                 ParentsSection()
                 BlockedAppsSection()
+                RewardsGuardianSection()
                 rulesSection
                 codeSection
                 Section {
@@ -253,6 +254,121 @@ private struct GuardianPanel: View {
         guard panel.runModal() == .OK else { return }
         for url in panel.urls {
             if let id = Bundle(url: url)?.bundleIdentifier { model.allowApp(bundleID: id) }
+        }
+    }
+}
+
+/// Guardian Settings: how fast credits come, the wallet, the wishlist and the watchlist.
+private struct RewardsGuardianSection: View {
+    @Environment(AppModel.self) private var model
+
+    @State private var amount = 1.0
+    @State private var note = ""
+    @State private var prices: [UUID: Double] = [:]
+
+    var body: some View {
+        Section {
+            Stepper(value: Binding(get: { model.settings.earnRate }, set: { model.setEarnRate($0) }),
+                    in: Credits.earnRateRange, step: 0.25) {
+                Text("Earning rate: ×\(model.settings.earnRate.formatted(.number.precision(.fractionLength(0...2))))")
+            }
+            Text("Changes what new work earns. Credits already earned stay.")
+                .font(.caption).foregroundStyle(.secondary)
+            LabeledContent("Balance", value: Credits.format(model.balance))
+            Stepper(value: $amount, in: 0.5...50, step: 0.5) {
+                Text("Amount: \(Credits.format(amount))")
+            }
+            TextField("Note", text: $note, prompt: Text("Optional: what it's for"))
+            HStack {
+                Spacer()
+                Button("Take Away") { adjust(-amount) }
+                Button("Add") { adjust(amount) }
+            }
+            .controlSize(.small)
+        } header: {
+            Text("Rewards")
+        }
+
+        Section("Wishlist") {
+            let wishes = model.rewards.wishes.filter(\.isOpenToGuardian)
+            if wishes.isEmpty {
+                Text("Nothing waiting.").font(.callout).foregroundStyle(.secondary)
+            }
+            ForEach(wishes) { wish in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(wish.name)
+                            Text(wish.realPrice + (wish.credits.map { " · \(Credits.format($0))" } ?? ""))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if case .bought = wish.state {
+                            Text("Bought").font(.caption).foregroundStyle(.blue)
+                        }
+                    }
+                    if case .bought = wish.state {
+                        HStack {
+                            Spacer()
+                            Button("Refund") { model.settleWish(wish.id, given: false) }
+                            Button("Given") { model.settleWish(wish.id, given: true) }
+                        }
+                        .controlSize(.small)
+                    } else {
+                        HStack {
+                            TextField("Credits", value: priceBinding(wish), format: .number)
+                                .frame(width: 80)
+                            Text("credits").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Set Price") {
+                                if let p = prices[wish.id], p > 0 { model.setWishPrice(wish.id, credits: p) }
+                                prices[wish.id] = nil
+                            }
+                            .disabled((prices[wish.id] ?? 0) <= 0)
+                        }
+                        .controlSize(.small)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+
+        Section("Watchlist") {
+            if model.watchlist.isEmpty {
+                Text("Nothing on it.").font(.callout).foregroundStyle(.secondary)
+            }
+            ForEach(model.watchlist) { item in
+                HStack {
+                    WatchIcon(item: item, size: 18)
+                    Text(item.name)
+                    if let removeAt = item.removeAt {
+                        Text("comes off \(Fmt.dateTime.string(from: removeAt))")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Take Off Now") { model.removeWatch(item.id, guardianApproved: true) }
+                        .controlSize(.small)
+                }
+            }
+        }
+    }
+
+    private func adjust(_ value: Double) {
+        model.adjustCredits(value, note: note)
+        note = ""
+    }
+
+    private func priceBinding(_ wish: WishItem) -> Binding<Double> {
+        Binding(get: { prices[wish.id] ?? wish.credits ?? 0 }, set: { prices[wish.id] = $0 })
+    }
+}
+
+private extension WishItem {
+    /// Bought ones to settle, and anything not yet bought to price.
+    var isOpenToGuardian: Bool {
+        switch state {
+        case .given, .refunded: false
+        default: true
         }
     }
 }
