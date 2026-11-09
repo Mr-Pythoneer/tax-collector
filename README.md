@@ -147,7 +147,7 @@ The proof check runs `claude -p` in the background, so the CLI must be signed in
 TAXCOLLECTOR_DATA_DIR=/tmp/tc-test TAXCOLLECTOR_DRY_RUN=1 "build.noindex/Tax Collector.app/Contents/MacOS/TaxCollector"
 ```
 
-- `TAXCOLLECTOR_DATA_DIR` uses separate data and skips the single-instance check.
+- `TAXCOLLECTOR_DATA_DIR` uses separate data and skips the single-instance check. A copy like this never really closes apps: it only logs what it would close (as with `TAXCOLLECTOR_DRY_RUN=1`), unless `TAXCOLLECTOR_ENFORCE_ONLY` names the apps it may close, or `TAXCOLLECTOR_TEST_REAL_CLOSE=1` is set.
 - `TAXCOLLECTOR_DRY_RUN=1` logs which apps would be closed instead of closing them, and lets you quit normally. So does `TAXCOLLECTOR_ALLOW_QUIT=1`.
 - `TAXCOLLECTOR_ENFORCE_ONLY=com.apple.TextEdit,com.apple.calculator` makes a real lock close only those apps. This lets you test real closing without losing anything else you have open.
 - `TAXCOLLECTOR_SELFTEST=1` runs every feature through the app's own code with a fake Claude, a fake Blackbaud and a fake Teams. It writes `selftest.txt` and quits. Always use it with a throwaway `TAXCOLLECTOR_DATA_DIR`.

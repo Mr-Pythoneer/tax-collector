@@ -7,6 +7,10 @@ import TaxCore
 @MainActor
 enum SelfTest {
     static func run(model: AppModel) async -> String {
+        // The lock tests start the enforcer. It must never close the real apps on this Mac.
+        guard model.dryRun || !(model.enforcer.onlyTargets ?? []).isEmpty else {
+            return "Refused: this copy would really close apps during the lock tests. Run it in test mode."
+        }
         var lines: [String] = []
         var failures = 0
         func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "") {

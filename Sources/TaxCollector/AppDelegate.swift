@@ -33,8 +33,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let env = ProcessInfo.processInfo.environment
-        let dryRun = env["TAXCOLLECTOR_DRY_RUN"] == "1"
         let testing = !(env["TAXCOLLECTOR_DATA_DIR"] ?? "").isEmpty
+        // A test copy never closes your real apps by accident: it only pretends, unless it's told exactly which
+        // apps it may close (TAXCOLLECTOR_ENFORCE_ONLY) or explicitly to close for real (TAXCOLLECTOR_TEST_REAL_CLOSE=1).
+        let enforceOnly = (env["TAXCOLLECTOR_ENFORCE_ONLY"] ?? "").trimmingCharacters(in: .whitespaces)
+        let dryRun = env["TAXCOLLECTOR_DRY_RUN"] == "1"
+            || (testing && enforceOnly.isEmpty && env["TAXCOLLECTOR_TEST_REAL_CLOSE"] != "1")
         canQuitFreely = dryRun || env["TAXCOLLECTOR_ALLOW_QUIT"] == "1"
         setupAllowed = !testing || env["TAXCOLLECTOR_TEST_SETUP"] == "1"
         isTestCopy = testing
