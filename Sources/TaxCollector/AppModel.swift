@@ -191,6 +191,7 @@ final class AppModel {
     func start() {
         store.log("START\(dryRun ? " (dry run)" : "") pid \(ProcessInfo.processInfo.processIdentifier)")
         tick()
+        repriceOldWishes()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }

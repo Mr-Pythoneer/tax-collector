@@ -748,12 +748,21 @@ enum SelfTest {
             }
 
             // Wishlist
-            model.settings.claudePath = fakeClaude("claude-price", #"{"credits":12,"reason":"About a week of good work."}"#)
+            model.settings.claudePath = fakeClaude("claude-price", #"{"usd":60,"note":"HK$470 is about $60."}"#)
             check("rewards: a wish needs a price", model.addWish(name: "Headphones", realPrice: "", note: "") != nil)
-            _ = model.addWish(name: "Headphones", realPrice: "$25", note: "")
+            _ = model.addWish(name: "Lens", realPrice: "$649.95", note: "")
+            check("rewards: a dollar price is worked out at once", model.rewards.wishes.last?.credits == 130
+                  && model.rewards.wishes.last?.state == .priced)
+            _ = model.addWish(name: "Headphones", realPrice: "HK$470", note: "")
             let wish = model.rewards.wishes.last!
             _ = await wait { model.rewards.wishes.last?.state != .pricing }
-            check("rewards: Claude prices a wish", model.rewards.wishes.last?.credits == 12 && model.rewards.wishes.last?.state == .priced)
+            check("rewards: Claude converts another currency, the rate sets the credits",
+                  model.rewards.wishes.last?.credits == 12 && model.rewards.wishes.last?.usd == 60
+                  && model.rewards.wishes.last?.priceReason.hasPrefix("HK$470") == true)
+            model.setDollarsPerCredit(10)
+            check("rewards: changing the rate reprices", model.rewards.wishes.last?.credits == 6
+                  && model.rewards.wishes.first { $0.name == "Lens" }?.credits == 65)
+            model.setDollarsPerCredit(5)
             model.adjustCredits(20, note: "Self test")
             let beforeWish = model.balance
             check("rewards: buying a wish takes its credits", model.buyWish(wish.id) == nil && abs(model.balance - (beforeWish - 12)) < 0.01)

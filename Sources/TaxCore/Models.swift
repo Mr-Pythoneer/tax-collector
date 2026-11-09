@@ -264,6 +264,8 @@ public struct Settings: Codable, Equatable, Sendable {
     public var parentMessage: ParentMessage?
     /// Multiplies the credits earned (0.5 to 2). Only the guardian can change it.
     public var earnRate: Double
+    /// Wishlist prices: this many dollars cost one credit. Only the guardian can change it.
+    public var dollarsPerCredit: Double
 
     public init() {
         penaltyMinutes = 30
@@ -288,6 +290,7 @@ public struct Settings: Codable, Equatable, Sendable {
         parentLinked = false
         parentMessage = nil
         earnRate = 1
+        dollarsPerCredit = Rewards.defaultDollarsPerCredit
     }
 
     // Decode field by field so adding a setting later doesn't wipe saved ones.
@@ -316,5 +319,6 @@ public struct Settings: Codable, Equatable, Sendable {
         parentLinked = try c.decodeIfPresent(Bool.self, forKey: .parentLinked) ?? false
         parentMessage = try c.decodeIfPresent(ParentMessage.self, forKey: .parentMessage)
         earnRate = try c.decodeIfPresent(Double.self, forKey: .earnRate) ?? 1
+        dollarsPerCredit = try c.decodeIfPresent(Double.self, forKey: .dollarsPerCredit) ?? Rewards.defaultDollarsPerCredit
     }
 }

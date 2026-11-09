@@ -1798,6 +1798,26 @@ struct RewardsRules {
         if case .given = s.wishes[1].state {} else { expect(false) }
     }
 
+    func wishlistPricesScaleWithCost() {
+        expect(Rewards.localUSD("$649.95") == 649.95)
+        expect(Rewards.localUSD("~150$") == 150)
+        expect(Rewards.localUSD("about 1,200") == 1200)
+        expect(Rewards.localUSD("265 USD") == 265)
+        expect(Rewards.localUSD("HK$500") == nil)
+        expect(Rewards.localUSD("¥180") == nil)
+        expect(Rewards.localUSD("100-150") == nil)
+        expect(Rewards.localUSD("free") == nil)
+        // The lens costs about 2.5× the kit, so it costs about 2.5× the credits.
+        expect(Rewards.wishCredits(usd: 649.95, dollarsPerCredit: 5) == 130)
+        expect(Rewards.wishCredits(usd: 265, dollarsPerCredit: 5) == 53)
+        expect(Rewards.wishCredits(usd: 2, dollarsPerCredit: 5) == 1)
+        expect(Rewards.wishCredits(usd: 100, dollarsPerCredit: 0) == 100)   // clamped to $1
+        let reason = Rewards.wishReason(usd: 649.95, dollarsPerCredit: 5, weeklyEarning: nil)
+        expect(reason == "$649.95 at $5 a credit = 130 credits, about 13 weeks at 10 credits a week.")
+        expect(Rewards.wishReason(usd: 64, dollarsPerCredit: 5, weeklyEarning: 20, note: "HK$500 is about $64")
+               == "HK$500 is about $64. $64 at $5 a credit = 13 credits, under a week of your usual earning.")
+    }
+
     func weeklyEarning() {
         var s = RewardsState()
         expect(Rewards.weeklyEarning(s, now: t0) == nil)
@@ -1822,13 +1842,11 @@ struct RewardsRules {
         expect(Auditor.parsePass(cliOutput: cli(#"{"decision":"grant","minutes":0,"reason":"x"}"#)).decision == .denied)
         expect(Auditor.parsePass(cliOutput: cli(#"{"decision":"deny","minutes":30,"reason":"x"}"#)).minutes == 0)
         expect(Auditor.parsePass(cliOutput: Data("nope".utf8)).decision == .error)
-        if case let .success(price) = Auditor.parsePrice(cliOutput: cli(#"{"credits":24.4,"reason":"About two weeks."}"#)) {
-            expect(price.credits == 24)
+        if case let .success(price) = Auditor.parsePrice(cliOutput: cli(#"{"usd":"64.1","note":"HK$500 is about $64."}"#)) {
+            expect(price.usd == 64.1 && price.note.hasPrefix("HK$500"))
         } else { expect(false) }
-        if case .success = Auditor.parsePrice(cliOutput: cli(#"{"credits":-3}"#)) { expect(false) }
-        if case let .success(price) = Auditor.parsePrice(cliOutput: cli(#"{"credits":0.2,"reason":"x"}"#)) {
-            expect(price.credits == 1)
-        } else { expect(false) }
+        if case .success = Auditor.parsePrice(cliOutput: cli(#"{"usd":-3}"#)) { expect(false) }
+        if case .success = Auditor.parsePrice(cliOutput: cli(#"{"credits":65}"#)) { expect(false) }
     }
 
     func olderFilesStillLoad() {
@@ -1837,7 +1855,7 @@ struct RewardsRules {
         let state = try? decoder.decode(RewardsState.self, from: Data(#"{"ledger":[]}"#.utf8))
         expect(state != nil && state!.watchlist.isEmpty && state!.freeTime.secondsLeft == 0)
         let settings = try? decoder.decode(Settings.self, from: Data(#"{"penaltyMinutes":10}"#.utf8))
-        expect(settings?.earnRate == 1)
+        expect(settings?.earnRate == 1 && settings?.dollarsPerCredit == 5)
         let proof = try? decoder.decode(ProofSubmission.self, from: Data(
             #"{"id":"6C3F7A0E-2B7B-4C55-9C51-3A8E4F2B9D11","submittedAt":"2027-01-01T00:00:00Z","note":"","attachments":[],"reason":""}"#.utf8))
         expect(proof != nil && proof?.grade == nil)
@@ -1860,6 +1878,7 @@ let checks: [(String, () -> Void)] = [
     ("RewardsRules.removingTakesADay", { RewardsRules().removingTakesADay() }),
     ("RewardsRules.wishlist", { RewardsRules().wishlist() }),
     ("RewardsRules.weeklyEarning", { RewardsRules().weeklyEarning() }),
+    ("RewardsRules.wishlistPricesScaleWithCost", { RewardsRules().wishlistPricesScaleWithCost() }),
     ("RewardsRules.auditorGradesAndAnswers", { RewardsRules().auditorGradesAndAnswers() }),
     ("RewardsRules.olderFilesStillLoad", { RewardsRules().olderFilesStillLoad() }),
     ("MatchRules.movedDeadlineStillMatches", { MatchRules().movedDeadlineStillMatches() }),

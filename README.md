@@ -198,7 +198,7 @@ Adding to the watchlist is instant. Taking something off takes effect 24 hours l
 
 **Keeping those permissions across updates.** macOS ties them to how the app is signed. Run `./scripts/make-signing-cert.sh` once: it makes a "Tax Collector Local Signing" certificate in your login keychain and asks for your password to trust it for code signing. After that, `build-app.sh` signs every build with it and macOS remembers your answers. Without it, every update is signed ad hoc and macOS asks again.
 
-**The wishlist.** Add something you want with its real price. Claude prices it in credits, from what it costs and what you've actually been earning per week. When you have enough, **Buy** takes the credits and marks it **Bought: show a parent**. The guardian then marks it **Given**, or refunds it. The guardian can also set any price and add or take credits, with a note.
+**The wishlist.** Add something you want with its real price. Its price in credits is that price ÷ the **wishlist rate**, $5 a credit unless the guardian changes it, so a $650 lens costs 130 credits and a $265 kit 53. A plain dollar price is worked out at once; for another currency or a vague price, Claude says what it is in US dollars first. Each item also says roughly how many weeks of your usual earning it is. When you have enough, **Buy** takes the credits and marks it **Bought: show a parent**. The guardian then marks it **Given**, or refunds it. The guardian can also change the rate (which reprices everything not bought yet), set any single price, and add or take credits, with a note.
 
 **Wallet.** Your balance, time left and every credit in and out: what each task earned and why, free time, wishlist buys and the guardian's changes.
 

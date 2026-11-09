@@ -230,6 +230,9 @@ public struct WishItem: Codable, Identifiable, Equatable, Sendable {
     public var addedAt: Date
     public var credits: Double?
     public var priceReason: String
+    /// What it costs in US dollars, read from `realPrice` (by Claude when it's another currency or vague).
+    /// The credit price is worked out from this at the guardian's rate. nil for older items.
+    public var usd: Double?
     /// "Claude" or "your guardian".
     public var pricedBy: String
     public var state: State
@@ -556,6 +559,45 @@ public enum Rewards {
     }
 
     // MARK: Wishlist
+
+    /// How many dollars of wishlist buy one credit, unless the guardian changes it.
+    public static let defaultDollarsPerCredit = 5.0
+    public static let dollarsPerCreditRange: ClosedRange<Double> = 1...50
+    /// Weekly earning assumed for the "about N weeks" note when there's no history yet.
+    public static let assumedWeeklyEarning = 10.0
+
+    /// A plain US-dollar price ("$649.95", "~150$", "about 1,200", "265 USD"), read without asking Claude.
+    /// nil for anything else (another currency, a range, words).
+    public static func localUSD(_ text: String) -> Double? {
+        let pattern = #"^\s*(?:~|≈|about|around|approx\.?|roughly)?\s*(?:US\s?)?\$?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*\$?\s*(?:USD|dollars?|bucks)?\s*$"#
+        guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let r = Range(m.range(at: 1), in: text),
+              let value = Double(text[r].replacingOccurrences(of: ",", with: "")), value > 0 else { return nil }
+        return value
+    }
+
+    /// The price in credits: dollars ÷ dollars per credit, rounded, never under 1.
+    public static func wishCredits(usd: Double, dollarsPerCredit: Double) -> Double {
+        let rate = min(max(dollarsPerCredit, dollarsPerCreditRange.lowerBound), dollarsPerCreditRange.upperBound)
+        return max(1, (usd / rate).rounded())
+    }
+
+    /// "$649.95 at $5 a credit = 130 credits, about 13 weeks of your usual earning."
+    public static func wishReason(usd: Double, dollarsPerCredit: Double, weeklyEarning: Double?, note: String = "") -> String {
+        let credits = wishCredits(usd: usd, dollarsPerCredit: dollarsPerCredit)
+        let weekly = weeklyEarning.flatMap { $0 > 0 ? $0 : nil }
+        let weeks = credits / (weekly ?? assumedWeeklyEarning)
+        let weeksText = weeks < 1 ? "under a week" : "about \(Int(weeks.rounded())) week\(Int(weeks.rounded()) == 1 ? "" : "s")"
+        let earning = weekly == nil ? "at \(Int(assumedWeeklyEarning)) credits a week" : "of your usual earning"
+        let lead = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (lead.isEmpty ? "" : lead.hasSuffix(".") ? lead + " " : lead + ". ")
+            + "\(dollars(usd)) at \(dollars(dollarsPerCredit)) a credit = \(Credits.format(credits)), \(weeksText) \(earning)."
+    }
+
+    public static func dollars(_ value: Double) -> String {
+        value == value.rounded() ? "$\(Int(value))" : String(format: "$%.2f", value)
+    }
 
     public static func buy(_ wishID: UUID, state: inout RewardsState, locked: Bool, now: Date) -> RewardsRefusal? {
         if locked { return .locked }

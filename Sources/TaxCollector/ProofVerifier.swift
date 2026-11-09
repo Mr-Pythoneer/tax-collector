@@ -135,11 +135,11 @@ enum ProofVerifier {
     }
 
     /// Asks Claude what a wishlist item should cost in credits.
-    static func priceWish(name: String, realPrice: String, note: String, weeklyEarning: Double?, folder: URL,
-                          settings: Settings, tokenFile: URL) async -> Result<(credits: Double, reason: String), Problem> {
+    static func priceWish(name: String, realPrice: String, note: String, folder: URL,
+                          settings: Settings, tokenFile: URL) async -> Result<(usd: Double, note: String), Problem> {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
-                let prompt = Auditor.pricePrompt(name: name, realPrice: realPrice, note: note, weeklyEarning: weeklyEarning)
+                let prompt = Auditor.pricePrompt(name: name, realPrice: realPrice, note: note)
                 switch runClaude(prompt: prompt, rules: Auditor.priceRules, tools: "", folder: folder,
                                  settings: settings, tokenFile: tokenFile) {
                 case let .failure(problem): cont.resume(returning: .failure(problem))

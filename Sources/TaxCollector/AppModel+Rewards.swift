@@ -205,32 +205,54 @@ extension AppModel {
         return nil
     }
 
+    /// A plain dollar price is worked out here at once; anything else goes to Claude to turn into dollars.
+    /// Either way the credits are dollars ÷ the guardian's rate, so prices scale with what things cost.
     func priceWish(_ id: UUID) {
         guard let i = rewards.wishes.firstIndex(where: { $0.id == id }) else { return }
+        let item = rewards.wishes[i]
+        if let usd = Rewards.localUSD(item.realPrice) {
+            setWishDollars(id, usd: usd, note: "")
+            return
+        }
         rewards.wishes[i].state = .pricing
         saveRewards()
-        let item = rewards.wishes[i]
-        let weekly = Rewards.weeklyEarning(rewards, now: now)
         let folder = store.dir.appendingPathComponent("wishlist/\(id.uuidString)", isDirectory: true)
         let settings = self.settings
         let tokenFile = self.tokenFile
         Task {
             let result = await ProofVerifier.priceWish(name: item.name, realPrice: item.realPrice, note: item.note,
-                                                       weeklyEarning: weekly, folder: folder, settings: settings,
-                                                       tokenFile: tokenFile)
+                                                       folder: folder, settings: settings, tokenFile: tokenFile)
             guard let j = self.rewards.wishes.firstIndex(where: { $0.id == id }), self.rewards.wishes[j].state == .pricing else { return }
             switch result {
             case let .success(price):
-                self.rewards.wishes[j].credits = price.credits
-                self.rewards.wishes[j].priceReason = price.reason
-                self.rewards.wishes[j].pricedBy = "Claude"
-                self.rewards.wishes[j].state = .priced
-                self.store.log("WISHLIST \"\(item.name)\" priced at \(Credits.format(price.credits)) by Claude: \(price.reason)")
+                self.setWishDollars(id, usd: price.usd, note: price.note)
+                return
             case let .failure(problem):
                 self.rewards.wishes[j].state = .unpriced(reason: problem.message)
                 self.store.log("WISHLIST couldn't price \"\(item.name)\": \(problem.message)")
             }
             self.saveRewards()
+        }
+    }
+
+    private func setWishDollars(_ id: UUID, usd: Double, note: String) {
+        guard let i = rewards.wishes.firstIndex(where: { $0.id == id }) else { return }
+        let rate = settings.dollarsPerCredit
+        rewards.wishes[i].usd = usd
+        rewards.wishes[i].credits = Rewards.wishCredits(usd: usd, dollarsPerCredit: rate)
+        rewards.wishes[i].priceReason = Rewards.wishReason(usd: usd, dollarsPerCredit: rate,
+                                                           weeklyEarning: Rewards.weeklyEarning(rewards, now: now), note: note)
+        rewards.wishes[i].pricedBy = "the wishlist rate"
+        rewards.wishes[i].state = .priced
+        saveRewards()
+        store.log("WISHLIST \"\(rewards.wishes[i].name)\" priced at \(Credits.format(rewards.wishes[i].credits ?? 0)): \(rewards.wishes[i].priceReason)")
+    }
+
+    /// Items priced by the old way (Claude guessing credits) are priced again by the rate.
+    func repriceOldWishes() {
+        for w in rewards.wishes where w.usd == nil && w.pricedBy == "Claude" && w.state == .priced {
+            store.log("WISHLIST pricing \"\(w.name)\" again by the wishlist rate")
+            priceWish(w.id)
         }
     }
 
@@ -287,6 +309,16 @@ extension AppModel {
         rewards.ledger.append(LedgerEntry(at: now, amount: a, kind: .guardian, note: text.isEmpty ? "From your guardian" : text))
         saveRewards()
         store.log("GUARDIAN \(a > 0 ? "added" : "took") \(Credits.format(abs(a)))\(text.isEmpty ? "" : ": \(text)")")
+    }
+
+    /// Changes the wishlist rate and reprices everything not yet bought (except prices the guardian set).
+    func setDollarsPerCredit(_ rate: Double) {
+        settings.dollarsPerCredit = min(max(rate, Rewards.dollarsPerCreditRange.lowerBound), Rewards.dollarsPerCreditRange.upperBound)
+        store.saveSettings(settings)
+        store.log("GUARDIAN set the wishlist rate to \(Rewards.dollars(settings.dollarsPerCredit)) a credit")
+        for w in rewards.wishes where w.usd != nil && w.pricedBy != Self.guardianName && w.state == .priced {
+            setWishDollars(w.id, usd: w.usd!, note: "")
+        }
     }
 
     func setEarnRate(_ rate: Double) {

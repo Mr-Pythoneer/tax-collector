@@ -435,7 +435,7 @@ private struct WishlistTab: View {
             } header: {
                 Text("Add something you want")
             } footer: {
-                Text("Claude prices it in credits from what it costs and what you usually earn. A parent hands it over once you buy it.")
+                Text("Its price in credits is what it costs ÷ \(Rewards.dollars(model.settings.dollarsPerCredit)) (the guardian sets that rate). Claude converts other currencies. A parent hands it over once you buy it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

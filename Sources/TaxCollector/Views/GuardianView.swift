@@ -300,6 +300,12 @@ private struct RewardsGuardianSection: View {
             }
             Text("Changes what new work earns. Credits already earned stay.")
                 .font(.caption).foregroundStyle(.secondary)
+            Stepper(value: Binding(get: { model.settings.dollarsPerCredit }, set: { model.setDollarsPerCredit($0) }),
+                    in: Rewards.dollarsPerCreditRange, step: 1) {
+                Text("Wishlist rate: \(Rewards.dollars(model.settings.dollarsPerCredit)) a credit")
+            }
+            Text("Wishlist prices are the item's price ÷ this. Changing it reprices everything not bought yet.")
+                .font(.caption).foregroundStyle(.secondary)
             LabeledContent("Balance", value: Credits.format(model.balance))
             Stepper(value: $amount, in: 0.5...50, step: 0.5) {
                 Text("Amount: \(Credits.format(amount))")
