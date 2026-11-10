@@ -190,7 +190,9 @@ Tax Collector also pays you for doing work early. Open **Tax Collector → Rewar
 
 - **Use your time left**, or **buy time** and start right away.
 - **Say you need it for school**: pick the task and say why. Claude decides whether that task really needs this site or app, and for how many minutes (at most 60). A pass opens only that one site or app, costs nothing, and works during a lock too. At most 3 passes per task a day; every request and Claude's answer go in the activity log.
-- **Not now**, which takes you back to the app you were in.
+- **Go Back** (for a site), which presses the browser's Back. The checkpoint covers only the page, so the tabs, sidebar and address bar stay usable and you can go to another tab. For an app, **Not Now** hides the app (it isn't closed).
+
+The checkpoint stays on the workspace it's on; swiping to another one takes it down at once. Covering only the page needs **Accessibility** for Tax Collector; without it the whole window is covered.
 
 Adding to the watchlist is instant. Taking something off takes effect 24 hours later (or at once if you added it in the last 5 minutes, or with the guardian code), so you can't take YouTube off in the moment.
 

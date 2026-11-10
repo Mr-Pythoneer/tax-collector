@@ -10,6 +10,10 @@ struct CheckpointView: View {
 
     private enum Mode { case choose, buy, school }
 
+    /// A site: the browser goes back a page, and its tabs stay clickable around the checkpoint.
+    /// An app: it's hidden (not closed).
+    private var leaveLabel: String { item.isSite ? "Go Back" : "Not Now" }
+
     @State private var mode: Mode = .choose
     @State private var minutes = 30
     @State private var taskID: UUID?
@@ -121,7 +125,7 @@ struct CheckpointView: View {
                 Text("I Need It for School…").frame(maxWidth: .infinity)
             }
             Button(role: .cancel, action: onLeave) {
-                Text("Not Now").frame(maxWidth: .infinity)
+                Text(leaveLabel).frame(maxWidth: .infinity)
             }
             .keyboardShortcut(.cancelAction)
         }
@@ -284,7 +288,7 @@ struct CheckpointView: View {
                     }
                 }
                 Spacer()
-                Button("Not Now", action: onLeave)
+                Button(leaveLabel, action: onLeave)
                     .keyboardShortcut(.cancelAction)
             }
         }

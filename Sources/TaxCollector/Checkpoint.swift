@@ -52,6 +52,69 @@ enum Checkpoint {
         return title as? String
     }
 
+    /// The web page's area inside a browser's focused window, in screen coordinates (bottom-left origin), so the
+    /// checkpoint covers the page but not the tabs, sidebar or address bar. Needs Accessibility; nil without it
+    /// or when the page can't be found (then the whole window is covered).
+    static func webAreaFrame(pid: pid_t) -> NSRect? {
+        guard AXIsProcessTrusted(), let primary = NSScreen.screens.first else { return nil }
+        let app = AXUIElementCreateApplication(pid)
+        // Chrome and other Chromium browsers only build their page's accessibility tree when asked to.
+        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        AXUIElementSetMessagingTimeout(app, 0.25)
+        var window: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &window) == .success,
+              let window, CFGetTypeID(window) == AXUIElementGetTypeID() else { return nil }
+        var queue: [(AXUIElement, Int)] = [(window as! AXUIElement, 0)]
+        var visited = 0
+        var best: CGRect?
+        while !queue.isEmpty && visited < 800 {
+            let (element, depth) = queue.removeFirst()
+            visited += 1
+            var role: CFTypeRef?
+            AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+            if (role as? String) == "AXWebArea" {
+                if let rect = frame(of: element), rect.width >= 200, rect.height >= 150,
+                   rect.width * rect.height > (best.map { $0.width * $0.height } ?? 0) {
+                    best = rect
+                }
+                continue   // a page's own frames are inside it
+            }
+            guard depth < 30 else { continue }
+            var children: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children) == .success,
+               let list = children as? [AXUIElement] {
+                queue.append(contentsOf: list.map { ($0, depth + 1) })
+            }
+        }
+        guard let rect = best else { return nil }
+        return NSRect(x: rect.minX, y: primary.frame.maxY - rect.maxY, width: rect.width, height: rect.height)
+    }
+
+    /// An element's frame in Accessibility's coordinates (top-left origin).
+    private static func frame(of element: AXUIElement) -> CGRect? {
+        var pos: CFTypeRef?
+        var size: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &pos) == .success,
+              AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &size) == .success,
+              let pos, let size else { return nil }
+        var point = CGPoint.zero
+        var extent = CGSize.zero
+        guard AXValueGetValue(pos as! AXValue, .cgPoint, &point),
+              AXValueGetValue(size as! AXValue, .cgSize, &extent) else { return nil }
+        return CGRect(origin: point, size: extent)
+    }
+
+    /// Presses ⌘[ (Back) in that app. Sent to the app itself, so it doesn't matter what's in front. Needs Accessibility.
+    static func pressBack(pid: pid_t) {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let bracket: CGKeyCode = 33
+        for down in [true, false] {
+            guard let event = CGEvent(keyboardEventSource: source, virtualKey: bracket, keyDown: down) else { continue }
+            event.flags = .maskCommand
+            event.postToPid(pid)
+        }
+    }
+
     /// The app's frontmost normal window, in screen coordinates (bottom-left origin). Needs no permission.
     static func frontWindowFrame(pid: pid_t) -> NSRect? {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
@@ -85,6 +148,15 @@ final class BrowserAddressReader: @unchecked Sendable {
     private let queue = DispatchQueue(label: AppModel.label + ".browser-address")
     /// Only touched on `queue`.
     private var scripts: [String: NSAppleScript] = [:]
+
+    /// Chromium browsers: Back in the front tab, through AppleScript (works without Accessibility).
+    func goBack(bundleID: String) {
+        queue.async {
+            let source = "tell application id \"\(bundleID)\" to tell active tab of front window to go back"
+            var error: NSDictionary?
+            NSAppleScript(source: source)?.executeAndReturnError(&error)
+        }
+    }
 
     func read(bundleID: String, kind: Checkpoint.BrowserKind, done: @escaping @Sendable (Answer) -> Void) {
         queue.async { [self] in
@@ -146,9 +218,10 @@ final class CheckpointController {
     /// The latest address read from each browser, by process.
     private var addresses: [pid_t: String] = [:]
     private var reading: Set<pid_t> = []
-    /// The last app in front that wasn't being checkpointed, for "Not now".
-    private var previousApp: NSRunningApplication?
     private var told: Set<String> = []
+    private var spaceObserver: NSObjectProtocol?
+    /// Where the page is in each browser window, so the tree isn't searched twice a second.
+    private var webAreas: [pid_t: (window: NSRect, area: NSRect?, at: Date)] = [:]
     var log: (String) -> Void = { _ in }
     /// For the self-test: what's being covered, if anything.
     private(set) var coveringItem: WatchItem?
@@ -167,6 +240,15 @@ final class CheckpointController {
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.check() }
+        }
+        // Swiping to another workspace: take the checkpoint down at once, then look at what's in front there.
+        spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.hide()
+                self?.check()
+            }
         }
         check()
     }
@@ -204,7 +286,6 @@ final class CheckpointController {
             show(item, over: app)
         } else {
             hide()
-            if item == nil { previousApp = app }
         }
     }
 
@@ -244,8 +325,13 @@ final class CheckpointController {
     }
 
     private func show(_ item: WatchItem, over app: NSRunningApplication) {
-        let frame = Checkpoint.frontWindowFrame(pid: app.processIdentifier)
+        let window = Checkpoint.frontWindowFrame(pid: app.processIdentifier)
             ?? (NSScreen.main ?? NSScreen.screens.first)?.frame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
+        var frame = window
+        // For a site, only the page: the tabs, sidebar and address bar stay usable, so you can just go elsewhere.
+        if item.isSite, let area = pageArea(pid: app.processIdentifier, window: window) {
+            frame = area
+        }
         let panel = self.panel ?? makePanel()
         if shownItemID != item.id {
             panel.contentView = container(makeContent(item) { [weak self] in self?.leave() })
@@ -258,6 +344,17 @@ final class CheckpointController {
         coveringItem = item
         if panel.frame != frame { panel.setFrame(frame, display: true) }
         if !panel.isVisible { panel.orderFrontRegardless() }
+    }
+
+    private func pageArea(pid: pid_t, window: NSRect) -> NSRect? {
+        if let cached = webAreas[pid], cached.window == window, Date().timeIntervalSince(cached.at) < 3 {
+            return cached.area
+        }
+        // Something too small to be the page (a frame, a pop-up) means the whole window is covered instead.
+        let area = Checkpoint.webAreaFrame(pid: pid).map { $0.intersection(window) }
+            .flatMap { $0.width * $0.height >= window.width * window.height * 0.3 ? $0 : nil }
+        webAreas[pid] = (window, area, Date())
+        return area
     }
 
     /// Puts the content in a plain view that follows the panel's size, so the content can never resize the panel.
@@ -300,7 +397,8 @@ final class CheckpointController {
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.isMovable = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        // On the workspace in front only: it mustn't show up on the next one while you swipe.
+        panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary, .ignoresCycle]
         self.panel = panel
         return panel
     }
@@ -314,14 +412,24 @@ final class CheckpointController {
         coveringItem = nil
     }
 
-    /// "Not now": back to the app you were in before. Nothing is closed.
+    /// A site: the browser goes back a page (its tabs stay clickable anyway). An app: it's hidden, not closed,
+    /// and you stay on this workspace.
     private func leave() {
-        let watched = shownPID.flatMap { NSRunningApplication(processIdentifier: $0) }
-        hide()
-        if let previous = previousApp, !previous.isTerminated, previous.processIdentifier != watched?.processIdentifier {
-            previous.activate()
+        guard let item = coveringItem, let pid = shownPID,
+              let watched = NSRunningApplication(processIdentifier: pid) else {
+            hide()
+            return
+        }
+        if item.isSite {
+            if Checkpoint.browserKind(watched.bundleIdentifier) == .chromium, let id = watched.bundleIdentifier {
+                reader.goBack(bundleID: id)
+            } else {
+                Checkpoint.pressBack(pid: pid)
+            }
+            log("CHECKPOINT went back a page in \(watched.localizedName ?? "the browser")")
         } else {
-            watched?.hide()
+            hide()
+            watched.hide()
         }
     }
 }
