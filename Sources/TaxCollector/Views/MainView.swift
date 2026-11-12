@@ -252,6 +252,12 @@ struct TaskListView: View {
             out.append(Notice(id: "feed", symbol: "exclamationmark.triangle.fill", color: .orange,
                               title: "Blackbaud import failed", detail: error, button: "Open…", action: open))
         }
+        if model.feedIsOn && model.blackbaudSignInChecked && !model.blackbaudSignedIn && model.feedError == nil {
+            out.append(Notice(id: "blackbaud-signin", symbol: "person.crop.circle.badge.exclamationmark", color: .orange,
+                              title: "Signed out of Blackbaud",
+                              detail: "Most assignments only show up on their due date this way. Sign in so Tax Collector reads Blackbaud's own list and imports work as soon as it's set.",
+                              button: "Sign In…", action: { model.onBlackbaudSignIn() }))
+        }
         if model.teamsIsOn, let error = model.teamsError {
             let open: () -> Void = { router.mainSheet = .teams }
             out.append(Notice(id: "teams", symbol: "exclamationmark.triangle.fill", color: .orange,

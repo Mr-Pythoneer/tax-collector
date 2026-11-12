@@ -55,6 +55,8 @@ final class AppModel {
     var feedSyncing = false
     var feedError: String?
     var blackbaudSignedIn = false
+    /// Set once Tax Collector has checked, so "signed out" isn't shown while it's still looking.
+    var blackbaudSignInChecked = false
     var teams: TeamsState
     var teamsSyncing = false
     var teamsError: String?

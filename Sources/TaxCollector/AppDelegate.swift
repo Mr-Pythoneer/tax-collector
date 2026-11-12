@@ -101,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         blackbaudLink.onSignedInChange = { [weak self] signedIn in
             let was = self?.model.blackbaudSignedIn ?? false
             self?.model.blackbaudSignedIn = signedIn
+            self?.model.blackbaudSignInChecked = true
             // Just signed in: import with Blackbaud's own list now, not in half an hour.
             if signedIn && !was { self?.model.syncFeed() }
             if signedIn {
@@ -191,6 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             Task {
                 let signedIn = await self.blackbaudLink.isSignedIn()
                 self.model.blackbaudSignedIn = signedIn
+                self.model.blackbaudSignInChecked = true
                 self.model.store.log(signedIn ? "BLACKBAUD signed in: assignments come from Blackbaud's own list too"
                                               : "BLACKBAUD signed out: only the feed is read, so work shows up late. Sign in under Blackbaud.")
                 // Signed in: import again now, with Blackbaud's own list.

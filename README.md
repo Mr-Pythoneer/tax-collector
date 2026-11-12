@@ -278,6 +278,7 @@ Tax Collector can import assignments from Blackbaud (`yourschool.myschoolapp.com
 
 **Get the link.** In Assignment Center, switch to the calendar view, open the menu next to it and choose **Share calendar**. Older versions have a feed icon that looks like the Wi-Fi symbol instead. Copy the link. It starts with `webcal://` and contains `/podium/feed/iCal.aspx?z=…`. Then paste it in **Tax Collector → Blackbaud** and click **Check Link**. You see what would be imported before anything is.
 
+- **Sign in too** (**Tax Collector → Blackbaud → Sign In**). The feed often lists an assignment only around its due date, so on its own most work shows up too late to import. Signed in, every sync also reads Blackbaud's own assignment list (60 days ahead), which has work as soon as it's set, with its real due time. Each assignment is still imported once, and work you've marked Completed in Blackbaud is skipped. Tax Collector keeps its own sign-in, separate from your browser's; the main window says when it has run out.
 - Use the Assignment Center feed, not the whole calendar's. The calendar feed also has class periods and school events, and each of those would become a task.
 - The Assignment Center feed only covers the next 60 days, and Blackbaud can take up to an hour to show changes.
 - Anyone with the link can read your calendar. It's kept in `settings.json` and never written to the log.
