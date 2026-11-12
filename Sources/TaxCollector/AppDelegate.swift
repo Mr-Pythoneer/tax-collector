@@ -99,7 +99,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             }
         }
         blackbaudLink.onSignedInChange = { [weak self] signedIn in
+            let was = self?.model.blackbaudSignedIn ?? false
             self?.model.blackbaudSignedIn = signedIn
+            // Just signed in: import with Blackbaud's own list now, not in half an hour.
+            if signedIn && !was { self?.model.syncFeed() }
             if signedIn {
                 runProbe()
                 self?.model.retrySignedOutDetails()

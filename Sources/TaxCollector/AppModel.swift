@@ -130,6 +130,7 @@ final class AppModel {
     @ObservationIgnored private var wasLocked = false
     @ObservationIgnored private var lastFeedAttempt: Date?
     @ObservationIgnored private var lastCenterSummary: String?
+    @ObservationIgnored private var feedResyncWanted = false
 
     var tokenFile: URL { store.dir.appendingPathComponent("claude-token") }
     var selfBundleID: String? { Bundle.main.bundleIdentifier }
@@ -570,7 +571,12 @@ final class AppModel {
     }
 
     func syncFeed() {
-        guard let url = feedURL, !feedSyncing else {
+        // Asked again while one is running (say, you just signed in): run once more right after it.
+        if feedSyncing {
+            feedResyncWanted = true
+            return
+        }
+        guard let url = feedURL else {
             if feedIsOn && feedURL == nil { feedError = "The saved feed link can't be read. Turn import off and add it again." }
             return
         }
@@ -581,6 +587,12 @@ final class AppModel {
             // Signed in, Blackbaud's own list has work as soon as it's set; the feed often only has it on its date.
             let listed = self.blackbaudSignedIn ? await self.blackbaudCenter() : nil
             self.feedSyncing = false
+            defer {
+                if self.feedResyncWanted {
+                    self.feedResyncWanted = false
+                    self.syncFeed()
+                }
+            }
             // Import may have been turned off, or pointed somewhere else, while this was in flight.
             guard self.feedURL == url else { return }
             let center = listed.map { Blackbaud.assignments(fromCenter: $0, allDayDueMinutes: self.settings.allDayDueMinutes) }
