@@ -599,7 +599,8 @@ final class AppModel {
             guard self.feedURL == url else { return }
             let center = listed.map { Blackbaud.assignments(fromCenter: $0, allDayDueMinutes: self.settings.allDayDueMinutes) }
             if let listed, let center {
-                let summary = "CENTER listed \(listed.count) assignment(s), \(center.filter { $0.dueDate > self.now }.count) still due"
+                let summary = "CENTER listed \(listed.count) assignment(s), \(center.filter { $0.dueDate > self.now }.count) still due, "
+                    + "\(listed.filter { $0.assigned != nil }.count) with the date they were set"
                 if summary != self.lastCenterSummary { self.store.log(summary) }
                 self.lastCenterSummary = summary
             }

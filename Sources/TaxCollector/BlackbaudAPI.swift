@@ -52,6 +52,7 @@ enum BlackbaudAPI {
                 title: title,
                 course: string(row["GroupName"] ?? row["groupname"]),
                 due: due,
+                assigned: date(string(row["DateAssigned"] ?? row["AssignedDate"] ?? row["date_assigned"])),
                 // What you set yourself. AssignmentStatusType flips to done on its own, so it's not used.
                 status: int(row["StudentStatus"] ?? row["assignment_status"]))
         }

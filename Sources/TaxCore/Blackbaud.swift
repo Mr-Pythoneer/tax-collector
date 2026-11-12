@@ -6,13 +6,19 @@ public struct BlackbaudAssignment: Codable, Equatable, Sendable {
     public var title: String
     public var details: String
     public var dueDate: Date
+    /// When it was set, from Blackbaud's own list (the feed doesn't say).
+    public var assignedDate: Date?
 
-    public init(uid: String, title: String, details: String = "", dueDate: Date) {
+    public init(uid: String, title: String, details: String = "", dueDate: Date, assignedDate: Date? = nil) {
         self.uid = uid
         self.title = title
         self.details = details
         self.dueDate = dueDate
+        self.assignedDate = assignedDate
     }
+
+    /// From Blackbaud's own list rather than the feed.
+    public var isFromCenter: Bool { uid.hasPrefix("center:") }
 }
 
 /// What the importer remembers between polls.
@@ -143,7 +149,7 @@ public enum Blackbaud {
                 dueDate = whole
             }
             return BlackbaudAssignment(uid: "center:\(item.indexID)", title: course.isEmpty ? name : "\(course): \(name)",
-                                       dueDate: dueDate)
+                                       dueDate: dueDate, assignedDate: item.assigned)
         }
     }
 
@@ -159,6 +165,36 @@ public enum Blackbaud {
             }
         }
         return center + extra
+    }
+
+    /// The class (its first part, "Individuals and Societies 8" of "Individuals and Societies 8 - INSC8 - 8D")
+    /// and the assignment's name, which Blackbaud, the feed and Teams all agree on.
+    public static func workKey(_ title: String) -> String {
+        let (course, name) = BlackbaudMatch.split(plainText(title))
+        let firstPart = course.map { String($0.split(separator: "-").first ?? "") } ?? ""
+        return BlackbaudMatch.normalized(firstPart) + "|" + BlackbaudMatch.normalized(name)
+    }
+
+    /// An older task for the same work as `item`, which Blackbaud's own list has with its real dates:
+    /// - imported from the feed, whose date was the day the work was set (so it's near `item`'s set date), or
+    /// - from Teams or typed in, due within a day and a half of it.
+    /// Never one with the same name from another week: both dates have to agree.
+    static func earlierCopy(of item: BlackbaudAssignment, tasks: [TaxTask], state: BlackbaudState,
+                            excluding: Set<Int> = [], listedUIDs: Set<String> = []) -> Int? {
+        guard item.isFromCenter else { return nil }
+        let key = workKey(item.title)
+        return tasks.indices.first { i in
+            let task = tasks[i]
+            guard !excluding.contains(i), workKey(task.title) == key else { return false }
+            switch task.source {
+            case let .blackbaud(uid):
+                guard !uid.hasPrefix("center:"), !listedUIDs.contains(uid), let set = item.assignedDate else { return false }
+                let feedDate = state.lastSeen[uid]?.dueDate ?? task.dueDate
+                return abs(feedDate.timeIntervalSince(set)) <= BlackbaudMatch.dueSlack
+            case .teams, .manual:
+                return abs(task.dueDate.timeIntervalSince(item.dueDate)) <= BlackbaudMatch.dueSlack
+            }
+        }
     }
 
     /// DUE when there is one. Otherwise the start, unless the event stretches over days
@@ -293,6 +329,12 @@ public enum Blackbaud {
                 } else {
                     notes.append("kept \"\(original.title)\" as is: it's locked in and the feed's change would loosen it")
                 }
+            } else if !state.isDismissed(item), item.dueDate > now,
+                      let other = earlierCopy(of: item, tasks: tasks, state: state, listedUIDs: Set(assignments.map(\.uid))),
+                      !tasks[other].isFromBlackbaud {
+                // Already a task from Teams (or typed in): don't make a second one.
+                state.dismissed.insert(item.uid)
+                notes.append("skipped \"\(item.title)\": it's already a task (\"\(tasks[other].title)\")")
             } else if !state.isDismissed(item), item.dueDate > now {
                 let task = TaxTask(title: item.title, details: item.details, dueDate: item.dueDate,
                                    createdAt: now, source: .blackbaud(uid: item.uid))
@@ -347,6 +389,14 @@ public enum Blackbaud {
             owner[pair.n] = pair.i
             taken.insert(pair.i)
         }
+        // A task imported from the feed (dated the day the work was set) and the same work in Blackbaud's own list.
+        for (n, item) in assignments.enumerated() where owner[n] == nil {
+            if let i = earlierCopy(of: item, tasks: tasks, state: state, excluding: taken, listedUIDs: feedUIDs),
+               tasks[i].isFromBlackbaud {
+                owner[n] = i
+                taken.insert(i)
+            }
+        }
         return owner
     }
 
@@ -367,6 +417,13 @@ public enum Blackbaud {
                     : tasks[a].createdAt > tasks[b].createdAt
             }!
             for i in indices where i != keep && tasks[i].isPending && tasks[i].proofs.isEmpty { drop.insert(i) }
+        }
+        // A copy imported from Blackbaud's own list of work that was already a task (from the feed, dated the day
+        // it was set, or from Teams). Only copies with no proof that aren't done; the older task stays.
+        for (i, task) in tasks.enumerated() where !drop.contains(i) && task.isPending && task.proofs.isEmpty {
+            guard case let .blackbaud(uid) = task.source, let seen = state.lastSeen[uid], seen.isFromCenter else { continue }
+            let others = Set(tasks.indices.filter { tasks[$0].createdAt >= task.createdAt || drop.contains($0) })
+            if earlierCopy(of: seen, tasks: tasks, state: state, excluding: others) != nil { drop.insert(i) }
         }
         let removed = drop.sorted().map { tasks[$0] }
         return (tasks.enumerated().filter { !drop.contains($0.offset) }.map(\.element), removed)

@@ -1617,6 +1617,54 @@ struct AssignmentCenterImport {
     }
 }
 
+extension AssignmentCenterImport {
+    func workYouAlreadyHave() {
+        let now = at(2026, 11, 11, 22)
+        // Imported from the feed on the day it was set (the feed's date), and proven already.
+        let feedItem = BlackbaudAssignment(uid: "f1", title: "French 8 - FSF8 - 8D: French Writing Assessment",
+                                           dueDate: at(2026, 11, 10, 22))
+        var state = BlackbaudState()
+        state.lastSeen["f1"] = feedItem
+        var done = TaxTask(title: feedItem.title, dueDate: feedItem.dueDate, createdAt: at(2026, 11, 10, 9),
+                           source: .blackbaud(uid: "f1"), status: .proven(at: at(2026, 11, 10, 20)))
+        done.proofs = [ProofSubmission(submittedAt: at(2026, 11, 10, 20), note: "", attachments: [], verdict: .accepted)]
+        // Proven through Teams, where the same work is due the same evening.
+        let teams = TaxTask(title: "Individuals and Societies 8: Research Assignment Criterion B", dueDate: at(2026, 11, 12, 22),
+                            createdAt: at(2026, 11, 5), source: .teams(id: "t1"), status: .proven(at: at(2026, 11, 9)))
+        // Last week's quiz with the same name: a different piece of work.
+        let lastWeek = TaxTask(title: "Mathematics 8 - MAT8 - 8D: Weekly Quiz", dueDate: at(2026, 11, 3, 22), createdAt: at(2026, 11, 3),
+                               source: .blackbaud(uid: "f2"), status: .proven(at: at(2026, 11, 3, 12)))
+        state.lastSeen["f2"] = BlackbaudAssignment(uid: "f2", title: lastWeek.title, dueDate: lastWeek.dueDate)
+        let listed = [
+            BlackbaudAssignment(uid: "center:1", title: "French 8 - FSF8 - 8D: French Writing Assessment",
+                                dueDate: at(2026, 11, 27, 14, 55), assignedDate: at(2026, 11, 11)),
+            BlackbaudAssignment(uid: "center:2", title: "Individuals and Societies 8 - INSC8 - 8D: Research Assignment Criterion B",
+                                dueDate: at(2026, 11, 12, 13, 25), assignedDate: at(2026, 11, 3)),
+            BlackbaudAssignment(uid: "center:3", title: "Mathematics 8 - MAT8 - 8D: Weekly Quiz",
+                                dueDate: at(2026, 11, 13, 22), assignedDate: at(2026, 11, 10)),
+        ]
+        let r = Blackbaud.sync(tasks: [done, teams, lastWeek], state: state, assignments: listed, now: now)
+        expect(r.added.map(\.title) == ["Mathematics 8 - MAT8 - 8D: Weekly Quiz"])   // only this week's quiz is new
+        expect(r.tasks.first?.source == .blackbaud(uid: "center:1"))                // the proven feed task is the same work
+        expect(r.state.dismissed.contains("center:2"))                             // the Teams task covers it
+        expect(r.tasks.count == 4)
+
+        // Second copies made by 0.10.5, before it knew this, are removed when nothing's been done on them.
+        var s2 = BlackbaudState()
+        s2.lastSeen["f1"] = feedItem
+        s2.lastSeen["center:1"] = listed[0]
+        s2.lastSeen["center:2"] = listed[1]
+        let copy1 = TaxTask(title: listed[0].title, dueDate: listed[0].dueDate, createdAt: now, source: .blackbaud(uid: "center:1"))
+        let copy2 = TaxTask(title: listed[1].title, dueDate: listed[1].dueDate, createdAt: now, source: .blackbaud(uid: "center:2"))
+        let merged = Blackbaud.mergeDuplicates([done, teams, copy1, copy2], state: s2)
+        expect(merged.removed.map(\.title) == [copy1.title, copy2.title] && merged.tasks.count == 2)
+        // One with proof is kept.
+        var worked = copy2
+        worked.proofs = [ProofSubmission(submittedAt: now, note: "", attachments: [])]
+        expect(Blackbaud.mergeDuplicates([teams, worked], state: s2).removed.isEmpty)
+    }
+}
+
 struct RewardsRules {
     private func accepted(at offset: TimeInterval, grade: Int? = 90, size: WorkSize? = .medium,
                           verdict: Verdict = .accepted) -> ProofSubmission {
@@ -1938,6 +1986,7 @@ let checks: [(String, () -> Void)] = [
     ("AssignmentCenterImport.rowsBecomeAssignments", { AssignmentCenterImport().rowsBecomeAssignments() }),
     ("AssignmentCenterImport.eachAssignmentOnce", { AssignmentCenterImport().eachAssignmentOnce() }),
     ("AssignmentCenterImport.signingInDoesntDuplicate", { AssignmentCenterImport().signingInDoesntDuplicate() }),
+    ("AssignmentCenterImport.workYouAlreadyHave", { AssignmentCenterImport().workYouAlreadyHave() }),
     ("RewardsRules.earlierEarnsMore", { RewardsRules().earlierEarnsMore() }),
     ("RewardsRules.lateAndExcusedEarnNothing", { RewardsRules().lateAndExcusedEarnNothing() }),
     ("RewardsRules.guardianAndMissingGrades", { RewardsRules().guardianAndMissingGrades() }),

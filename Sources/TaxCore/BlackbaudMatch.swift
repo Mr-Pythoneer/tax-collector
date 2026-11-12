@@ -8,12 +8,15 @@ public struct BlackbaudListedAssignment: Equatable, Sendable {
     public var title: String
     public var course: String
     public var due: Date?
+    /// When the teacher set it.
+    public var assigned: Date?
     /// The status you set yourself: -1 to do, 0 in progress, 1 completed. Blackbaud sends
     /// -2147483648 when you've never set one.
     public var status: Int?
 
     public init(indexID: Int, assignmentID: Int? = nil, title: String, course: String = "", due: Date? = nil,
-                status: Int? = nil) {
+                assigned: Date? = nil, status: Int? = nil) {
+        self.assigned = assigned
         self.indexID = indexID
         self.assignmentID = assignmentID
         self.title = title
