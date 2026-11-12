@@ -174,10 +174,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             self.model.blackbaudSignedIn = await self.blackbaudLink.isSignedIn()
             return failure
         }
+        model.blackbaudCenter = { [weak self] in
+            guard let self else { return nil }
+            self.blackbaudLink.configure(feedURL: self.model.feedURL)
+            do {
+                return try await BlackbaudAPI.upcoming(link: self.blackbaudLink)
+            } catch {
+                self.model.store.log("CENTER couldn't be read: \(error.localizedDescription)")
+                return nil
+            }
+        }
         if model.feedURL != nil {
             Task {
                 let signedIn = await self.blackbaudLink.isSignedIn()
                 self.model.blackbaudSignedIn = signedIn
+                // Signed in: import again now, with Blackbaud's own list.
+                if signedIn { self.model.syncFeed() }
                 if probe {
                     if signedIn { runProbe() } else { self.blackbaudLink.showSignIn() }
                 }

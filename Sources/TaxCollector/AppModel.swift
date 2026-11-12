@@ -99,6 +99,8 @@ final class AppModel {
         .failure(.init(message: "Blackbaud isn't connected."))
     }
     @ObservationIgnored var onBlackbaudSignOut: () -> Void = {}
+    /// Blackbaud's own assignment list while you're signed in (nil when it couldn't be read).
+    @ObservationIgnored var blackbaudCenter: () async -> [BlackbaudListedAssignment]? = { nil }
     /// Marks an assignment Completed in Blackbaud. Returns nil on success, or why it failed.
     @ObservationIgnored var blackbaudMarker: (TaxTask) async -> String? = { _ in "Blackbaud isn't connected." }
     /// Turns an assignment in on Teams. Returns nil on success, or why it failed.
@@ -127,6 +129,7 @@ final class AppModel {
     @ObservationIgnored private var lastUptime = ProcessInfo.processInfo.systemUptime
     @ObservationIgnored private var wasLocked = false
     @ObservationIgnored private var lastFeedAttempt: Date?
+    @ObservationIgnored private var lastCenterSummary: String?
 
     var tokenFile: URL { store.dir.appendingPathComponent("claude-token") }
     var selfBundleID: String? { Bundle.main.bundleIdentifier }
@@ -575,15 +578,24 @@ final class AppModel {
         lastFeedAttempt = Date()
         Task {
             let outcome = await FeedFetcher.fetch(url)
+            // Signed in, Blackbaud's own list has work as soon as it's set; the feed often only has it on its date.
+            let listed = self.blackbaudSignedIn ? await self.blackbaudCenter() : nil
             self.feedSyncing = false
             // Import may have been turned off, or pointed somewhere else, while this was in flight.
             guard self.feedURL == url else { return }
+            let center = listed.map { Blackbaud.assignments(fromCenter: $0, allDayDueMinutes: self.settings.allDayDueMinutes) }
+            if let listed, let center {
+                let summary = "CENTER listed \(listed.count) assignment(s), \(center.filter { $0.dueDate > self.now }.count) still due"
+                if summary != self.lastCenterSummary { self.store.log(summary) }
+                self.lastCenterSummary = summary
+            }
             switch outcome {
             case let .events(events):
-                self.importFeed(events)
+                self.importFeed(events, center: center ?? [])
             case let .failed(message):
                 if self.feedError != message { self.store.log("FEED failed (\(Blackbaud.redacted(url))): \(message)") }
                 self.feedError = message
+                if let center, !center.isEmpty { self.importFeed([], center: center) }
             }
         }
     }
@@ -596,8 +608,9 @@ final class AppModel {
         syncFeed()
     }
 
-    private func importFeed(_ events: [ICalEvent]) {
-        let items = Blackbaud.assignments(from: events, allDayDueMinutes: settings.allDayDueMinutes)
+    private func importFeed(_ events: [ICalEvent], center: [BlackbaudAssignment] = []) {
+        let feed = Blackbaud.assignments(from: events, allDayDueMinutes: settings.allDayDueMinutes)
+        let items = Blackbaud.combine(feed: feed, center: center)
         let result = Blackbaud.sync(tasks: tasks, state: blackbaud, assignments: items, now: now)
         let merged = Blackbaud.mergeDuplicates(result.tasks, state: result.state)
         if !merged.removed.isEmpty { store.log("FEED merged \(merged.removed.count) duplicate imported task(s)") }

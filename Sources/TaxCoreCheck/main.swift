@@ -1561,6 +1561,62 @@ struct TeamsTurnIn {
     }
 }
 
+struct AssignmentCenterImport {
+    let tz = TimeZone(identifier: "America/New_York")!
+    func at(_ y: Int, _ m: Int, _ d: Int, _ h: Int = 0, _ min: Int = 0) -> Date {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = tz
+        return cal.date(from: DateComponents(year: y, month: m, day: d, hour: h, minute: min))!
+    }
+
+    func rowsBecomeAssignments() {
+        let rows = [
+            BlackbaudListedAssignment(indexID: 1, title: "Unit 2 Lesson 1", course: "Mathematics 8 - MAT8 - 8D",
+                                      due: at(2026, 11, 14, 23, 59), status: -1),
+            BlackbaudListedAssignment(indexID: 2, title: "Essay", course: "English 8", due: at(2026, 11, 15), status: nil),
+            BlackbaudListedAssignment(indexID: 3, title: "Done already", course: "French 8", due: at(2026, 11, 15), status: 1),
+            BlackbaudListedAssignment(indexID: 4, title: "No date", course: "French 8", due: nil),
+            BlackbaudListedAssignment(indexID: 1, title: "Unit 2 Lesson 1", course: "Mathematics 8 - MAT8 - 8D",
+                                      due: at(2026, 11, 14, 23, 59)),
+        ]
+        let out = Blackbaud.assignments(fromCenter: rows, allDayDueMinutes: -120, timeZone: tz)
+        expect(out.count == 2)
+        expect(out.first?.uid == "center:1" && out.first?.title == "Mathematics 8 - MAT8 - 8D: Unit 2 Lesson 1")
+        expect(out.first?.dueDate == at(2026, 11, 14, 23, 59))       // a real time stays
+        expect(out.last?.dueDate == at(2026, 11, 14, 22, 0))         // a whole day: 10 PM the evening before
+    }
+
+    func eachAssignmentOnce() {
+        let center = [BlackbaudAssignment(uid: "center:1", title: "Mathematics 8 - MAT8 - 8D: Unit 1 Lesson 9 : Dilations",
+                                          dueDate: at(2026, 11, 5, 23, 59))]
+        let feed = [
+            BlackbaudAssignment(uid: "f1", title: "Mathematics 8 -  MAT8 - 8D: Unit 1 Lesson 9 : Dilations\u{00A0}",
+                                dueDate: at(2026, 11, 4, 22)),
+            BlackbaudAssignment(uid: "f2", title: "French 8 - FSF8 - 8D: Dictée", dueDate: at(2026, 11, 6, 22)),
+        ]
+        let both = Blackbaud.combine(feed: feed, center: center)
+        expect(both.map(\.uid) == ["center:1", "f2"])
+        expect(Blackbaud.combine(feed: feed, center: []).map(\.uid) == ["f1", "f2"])
+    }
+
+    func signingInDoesntDuplicate() {
+        // Imported from the feed first, then Blackbaud's own list has the same assignment.
+        let now = at(2026, 11, 3, 12)
+        let feedItem = BlackbaudAssignment(uid: "f1", title: "Drama 8: Part 2", dueDate: at(2026, 11, 4, 22))
+        let first = Blackbaud.sync(tasks: [], state: BlackbaudState(), assignments: [feedItem], now: now)
+        expect(first.added.count == 1)
+        let centerItem = BlackbaudAssignment(uid: "center:9", title: "Drama 8: Part 2", dueDate: at(2026, 11, 4, 23, 59))
+        let second = Blackbaud.sync(tasks: first.tasks, state: first.state,
+                                    assignments: Blackbaud.combine(feed: [feedItem], center: [centerItem]), now: now)
+        expect(second.added.isEmpty && second.tasks.count == 1)
+        expect(second.tasks.first?.source == .blackbaud(uid: "center:9"))
+        // Work set today and due tomorrow is imported while it's still ahead.
+        let early = BlackbaudAssignment(uid: "center:10", title: "Math: Lesson 10", dueDate: at(2026, 11, 6, 23, 59))
+        let third = Blackbaud.sync(tasks: second.tasks, state: second.state, assignments: [centerItem, early], now: now)
+        expect(third.added.map(\.title) == ["Math: Lesson 10"])
+    }
+}
+
 struct RewardsRules {
     private func accepted(at offset: TimeInterval, grade: Int? = 90, size: WorkSize? = .medium,
                           verdict: Verdict = .accepted) -> ProofSubmission {
@@ -1879,6 +1935,9 @@ struct RewardsRules {
 }
 
 let checks: [(String, () -> Void)] = [
+    ("AssignmentCenterImport.rowsBecomeAssignments", { AssignmentCenterImport().rowsBecomeAssignments() }),
+    ("AssignmentCenterImport.eachAssignmentOnce", { AssignmentCenterImport().eachAssignmentOnce() }),
+    ("AssignmentCenterImport.signingInDoesntDuplicate", { AssignmentCenterImport().signingInDoesntDuplicate() }),
     ("RewardsRules.earlierEarnsMore", { RewardsRules().earlierEarnsMore() }),
     ("RewardsRules.lateAndExcusedEarnNothing", { RewardsRules().lateAndExcusedEarnNothing() }),
     ("RewardsRules.guardianAndMissingGrades", { RewardsRules().guardianAndMissingGrades() }),

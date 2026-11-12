@@ -120,6 +120,47 @@ public enum Blackbaud {
         }
     }
 
+    // MARK: The Assignment Center (when signed in)
+
+    /// Rows from Blackbaud's own assignment list, as the same kind of assignment the feed gives. They're named
+    /// "<class>: <assignment>" like the feed's, and keyed "center:<index id>". Ones you've marked Completed in
+    /// Blackbaud and ones without a due date are left out. A due date with no time (midnight) counts as a
+    /// whole day, like the feed's.
+    public static func assignments(fromCenter items: [BlackbaudListedAssignment], allDayDueMinutes: Int,
+                                   timeZone: TimeZone = .current) -> [BlackbaudAssignment] {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = timeZone
+        var seen = Set<Int>()
+        return items.compactMap { item in
+            guard let due = item.due, item.status != 1, seen.insert(item.indexID).inserted else { return nil }
+            let name = plainText(item.title)
+            let course = plainText(item.course)
+            guard !name.isEmpty else { return nil }
+            var dueDate = due
+            let parts = cal.dateComponents([.year, .month, .day, .hour, .minute], from: due)
+            if parts.hour == 0 && parts.minute == 0, let y = parts.year, let m = parts.month, let d = parts.day,
+               let whole = resolve(.allDay(year: y, month: m, day: d), allDayDueMinutes: allDayDueMinutes, timeZone: timeZone) {
+                dueDate = whole
+            }
+            return BlackbaudAssignment(uid: "center:\(item.indexID)", title: course.isEmpty ? name : "\(course): \(name)",
+                                       dueDate: dueDate)
+        }
+    }
+
+    /// The Assignment Center's list plus the feed's, with each assignment once. When both have it (same class
+    /// and title, due within a day and a half), the Assignment Center's wins: it lists work as soon as it's set,
+    /// with its real due time, while the feed only shows it around its date.
+    public static func combine(feed: [BlackbaudAssignment], center: [BlackbaudAssignment]) -> [BlackbaudAssignment] {
+        guard !center.isEmpty else { return feed }
+        let extra = feed.filter { f in
+            let key = BlackbaudMatch.normalized(f.title)
+            return !center.contains {
+                BlackbaudMatch.normalized($0.title) == key && abs($0.dueDate.timeIntervalSince(f.dueDate)) <= BlackbaudMatch.dueSlack
+            }
+        }
+        return center + extra
+    }
+
     /// DUE when there is one. Otherwise the start, unless the event stretches over days
     /// (set on Monday, due Thursday), in which case its last day.
     public static func dueDate(of event: ICalEvent, allDayDueMinutes: Int, timeZone: TimeZone) -> Date? {

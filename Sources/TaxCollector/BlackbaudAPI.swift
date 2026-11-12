@@ -77,6 +77,23 @@ enum BlackbaudAPI {
 
     private static func string(_ v: Any?) -> String { v as? String ?? "" }
 
+    // MARK: Importing
+
+    /// Everything Blackbaud lists for you from yesterday to 60 days ahead, for importing: the current list
+    /// (which only shows a few weeks) and the older date-range list, each assignment once.
+    @MainActor
+    static func upcoming(link: BlackbaudLink, now: Date = Date()) async throws -> [BlackbaudListedAssignment] {
+        var byIndex: [Int: BlackbaudListedAssignment] = [:]
+        let center = try await link.call("GET", centerPath)
+        if center.status == 200 { for item in parseList(center.json) { byIndex[item.indexID] = item } }
+        let r = try await link.call("GET", dataDirectPath(from: now.addingTimeInterval(-86400),
+                                                          to: now.addingTimeInterval(60 * 86400), filter: 0))
+        if r.status == 200 {
+            for item in parseList(r.json) where byIndex[item.indexID] == nil { byIndex[item.indexID] = item }
+        }
+        return Array(byIndex.values)
+    }
+
     // MARK: Marking Completed
 
     /// Everything Blackbaud lists for you around this task's due date: the current list first,
