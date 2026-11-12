@@ -191,6 +191,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             Task {
                 let signedIn = await self.blackbaudLink.isSignedIn()
                 self.model.blackbaudSignedIn = signedIn
+                self.model.store.log(signedIn ? "BLACKBAUD signed in: assignments come from Blackbaud's own list too"
+                                              : "BLACKBAUD signed out: only the feed is read, so work shows up late. Sign in under Blackbaud.")
                 // Signed in: import again now, with Blackbaud's own list.
                 if signedIn { self.model.syncFeed() }
                 if probe {
