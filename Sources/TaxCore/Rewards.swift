@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import ImageIO
 
 // Credits, free time, the watchlist, research passes and the wishlist.
 // 1 credit = 30 minutes of free time. Credits are earned when a task's proof is accepted: more for
@@ -72,6 +73,8 @@ public struct LedgerEntry: Codable, Identifiable, Equatable, Sendable {
         case refund
         /// Added or taken by the guardian.
         case guardian
+        /// A marked test or assignment you showed.
+        case grade
     }
 
     public var id: UUID
@@ -261,14 +264,17 @@ public struct RewardsState: Codable, Equatable, Sendable {
     public var passes: [ResearchPass]
     public var wishes: [WishItem]
     public var watchlist: [WatchItem]
+    /// Marked work you showed for credits, accepted or not, so the same one can't count twice.
+    public var grades: [GradeClaim]
 
     public init(ledger: [LedgerEntry] = [], freeTime: FreeTime = FreeTime(), passes: [ResearchPass] = [],
-                wishes: [WishItem] = [], watchlist: [WatchItem] = []) {
+                wishes: [WishItem] = [], watchlist: [WatchItem] = [], grades: [GradeClaim] = []) {
         self.ledger = ledger
         self.freeTime = freeTime
         self.passes = passes
         self.wishes = wishes
         self.watchlist = watchlist
+        self.grades = grades
     }
 
     public init(from decoder: Decoder) throws {
@@ -279,6 +285,7 @@ public struct RewardsState: Codable, Equatable, Sendable {
         passes = try c.decodeIfPresent([ResearchPass].self, forKey: .passes) ?? []
         wishes = try c.decodeIfPresent([WishItem].self, forKey: .wishes) ?? []
         watchlist = try c.decodeIfPresent([WatchItem].self, forKey: .watchlist) ?? []
+        grades = try c.decodeIfPresent([GradeClaim].self, forKey: .grades) ?? []
     }
 
     public var balance: Double { Credits.rounded(ledger.reduce(0) { $0 + $1.amount }) }
@@ -631,5 +638,153 @@ public enum Rewards {
             }
             state.wishes[i].state = .refunded(at: now)
         }
+    }
+}
+
+
+// MARK: - Grades you show for credits
+
+/// What kind of marked work it was.
+public enum GradeKind: String, Codable, Equatable, Sendable, CaseIterable {
+    /// A test, exam or big project.
+    case test
+    case quiz
+    /// Any other marked assignment.
+    case assignment
+
+    public var weight: Double {
+        switch self {
+        case .test: 2
+        case .quiz: 1
+        case .assignment: 0.5
+        }
+    }
+}
+
+/// A screenshot of a marked test or rubric, shown for credits.
+public struct GradeClaim: Codable, Identifiable, Equatable, Sendable {
+    public enum Decision: String, Codable, Equatable, Sendable {
+        case accepted
+        case rejected
+        /// It's the same marked work as one shown before.
+        case duplicate
+        case error
+    }
+
+    public var id: UUID
+    public var at: Date
+    /// The image's file name in its folder (grades/<id>/).
+    public var file: String
+    /// SHA-256 of the file: the very same file.
+    public var fileHash: String
+    /// A 64-bit picture fingerprint (difference hash): the same picture re-saved, scaled or slightly cropped.
+    public var pictureHash: UInt64?
+    /// nil while Claude is reading it.
+    public var decision: Decision?
+    public var reason: String
+    public var course: String
+    public var assessment: String
+    public var score: String
+    public var percent: Double?
+    public var kind: GradeKind?
+    public var credits: Double
+
+    public init(id: UUID = UUID(), at: Date, file: String, fileHash: String, pictureHash: UInt64?,
+                decision: Decision? = nil, reason: String = "", course: String = "", assessment: String = "",
+                score: String = "", percent: Double? = nil, kind: GradeKind? = nil, credits: Double = 0) {
+        self.id = id
+        self.at = at
+        self.file = file
+        self.fileHash = fileHash
+        self.pictureHash = pictureHash
+        self.decision = decision
+        self.reason = reason
+        self.course = course
+        self.assessment = assessment
+        self.score = score
+        self.percent = percent
+        self.kind = kind
+        self.credits = credits
+    }
+
+    /// Class and assessment, the same however the picture was taken.
+    public var contentKey: String { Grades.contentKey(course: course, assessment: assessment) }
+}
+
+public enum Grades {
+    /// Pictures this close (out of 64 bits) are the same picture.
+    public static let samePictureBits = 10
+
+    /// 1.5 for 90% and up, 1 for 80s, 0.5 for 70s, nothing below.
+    public static func factor(percent: Double) -> Double {
+        switch percent {
+        case 90...: 1.5
+        case 80..<90: 1
+        case 70..<80: 0.5
+        default: 0
+        }
+    }
+
+    public static func credits(percent: Double, kind: GradeKind, earnRate: Double) -> Double {
+        let rate = min(max(earnRate, Credits.earnRateRange.lowerBound), Credits.earnRateRange.upperBound)
+        return Credits.rounded(kind.weight * factor(percent: percent) * rate)
+    }
+
+    public static func contentKey(course: String, assessment: String) -> String {
+        Blackbaud.plainText(course + "|" + assessment).lowercased().unicodeScalars
+            .filter { CharacterSet.alphanumerics.contains($0) || $0 == "|" }
+            .map(String.init).joined()
+    }
+
+    public static func distance(_ a: UInt64, _ b: UInt64) -> Int { (a ^ b).nonzeroBitCount }
+
+    /// A difference hash: the picture shrunk to 9×8 grey pixels, one bit per pair of neighbours (is the left one
+    /// brighter?). Re-saving, rescaling or a small crop barely changes it; a different picture changes about half.
+    public static func pictureHash(of data: Data) -> UInt64? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        return pictureHash(of: image)
+    }
+
+    public static func pictureHash(of image: CGImage) -> UInt64? {
+        let w = 9, h = 8
+        var pixels = [UInt8](repeating: 0, count: w * h)
+        let drawn: Bool = pixels.withUnsafeMutableBytes { buffer in
+            guard let ctx = CGContext(data: buffer.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w,
+                                      space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)
+            else { return false }
+            ctx.interpolationQuality = .medium
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
+        }
+        guard drawn else { return nil }
+        var hash: UInt64 = 0
+        for y in 0..<h {
+            for x in 0..<(w - 1) {
+                hash <<= 1
+                if pixels[y * w + x] > pixels[y * w + x + 1] { hash |= 1 }
+            }
+        }
+        return hash
+    }
+
+    /// Why this picture can't count before Claude even looks, or nil. Pictures that were rejected or couldn't
+    /// be read don't block it, so you can try again with a clearer one.
+    public static func refusal(fileHash: String, pictureHash: UInt64?, among claims: [GradeClaim]) -> String? {
+        let counted = claims.filter { $0.decision == .accepted || $0.decision == nil }
+        if counted.contains(where: { $0.fileHash == fileHash }) {
+            return "You've already shown this picture."
+        }
+        if let pictureHash, counted.contains(where: { $0.pictureHash.map { distance($0, pictureHash) <= samePictureBits } ?? false }) {
+            return "This is the same picture as one you've already shown, re-saved or cropped."
+        }
+        return nil
+    }
+
+    /// The earlier accepted claim for the same class and assessment, if any.
+    public static func alreadyCounted(_ claim: GradeClaim, among claims: [GradeClaim]) -> GradeClaim? {
+        let key = claim.contentKey
+        guard key.count > 2 else { return nil }
+        return claims.first { $0.id != claim.id && $0.decision == .accepted && $0.contentKey == key }
     }
 }

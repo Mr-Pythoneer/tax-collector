@@ -146,7 +146,13 @@ final class AppModel {
         blackbaud = store.loadBlackbaud()
         teams = store.loadTeams()
         recurring = store.loadRecurring()
-        rewards = store.loadRewards()
+        var loadedRewards = store.loadRewards()
+        // A grade Claude was still reading when the app quit: let it be shown again.
+        for g in loadedRewards.grades.indices where loadedRewards.grades[g].decision == nil {
+            loadedRewards.grades[g].decision = .error
+            loadedRewards.grades[g].reason = "The check was interrupted. Show it again."
+        }
+        rewards = loadedRewards
         enforcer = Enforcer(dryRun: dryRun)
         now = LockPolicy.effectiveNow(systemNow: Date(), lastSeen: settings.lastSeen)
 

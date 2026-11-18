@@ -134,6 +134,25 @@ enum ProofVerifier {
         }
     }
 
+    /// Asks Claude to read a picture of marked work.
+    static func readGrade(files: [String], alreadyCounted: [String], note: String, folder: URL, settings: Settings,
+                          tokenFile: URL) async -> Result<Auditor.GradeReading, Problem> {
+        await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let prompt = Auditor.gradePrompt(files: files, alreadyCounted: alreadyCounted, note: note)
+                switch runClaude(prompt: prompt, rules: Auditor.gradeRules, tools: "Read", folder: folder,
+                                 settings: settings, tokenFile: tokenFile) {
+                case let .failure(problem): cont.resume(returning: .failure(problem))
+                case let .success(data):
+                    switch Auditor.parseGrade(cliOutput: data) {
+                    case let .success(reading): cont.resume(returning: .success(reading))
+                    case let .failure(problem): cont.resume(returning: .failure(Problem(message: problem.message)))
+                    }
+                }
+            }
+        }
+    }
+
     /// Asks Claude what a wishlist item should cost in credits.
     static func priceWish(name: String, realPrice: String, note: String, folder: URL,
                           settings: Settings, tokenFile: URL) async -> Result<(usd: Double, note: String), Problem> {

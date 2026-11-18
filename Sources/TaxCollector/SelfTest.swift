@@ -801,6 +801,49 @@ enum SelfTest {
             check("rewards: buying a wish takes its credits", model.buyWish(wish.id) == nil && abs(model.balance - (beforeWish - 12)) < 0.01)
             model.settleWish(wish.id, given: false)
             check("rewards: a refund gives them back", abs(model.balance - beforeWish) < 0.01)
+            // Grades: a picture of marked work earns credits once.
+            func gradePicture(_ seed: Int, scale: Double = 1) -> URL {
+                let w = Int(800 * scale), h = Int(600 * scale)
+                let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+                ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+                var r = UInt64(seed * 7919 + 17)
+                for _ in 0..<14 {
+                    r = r &* 6364136223846793005 &+ 1442695040888963407
+                    let x = Double(r % 800) * scale, y = Double((r >> 16) % 600) * scale
+                    let shade = Double((r >> 48) % 200) / 255
+                    ctx.setFillColor(CGColor(red: shade, green: shade * 0.8, blue: 0.3, alpha: 1))
+                    ctx.fill(CGRect(x: x, y: y, width: Double(60 + (r >> 32) % 300) * scale, height: Double(30 + (r >> 40) % 200) * scale))
+                }
+                let url = dir.appendingPathComponent("grade-\(seed)-\(Int(scale * 100)).png")
+                let rep = NSBitmapImageRep(cgImage: ctx.makeImage()!)
+                try? rep.representation(using: .png, properties: [:])?.write(to: url)
+                return url
+            }
+            model.settings.claudePath = fakeClaude("claude-grade", #"{"verdict":"accept","reason":"Clear mark.","course":"Science 8","assessment":"Cells Test","score":"46/50","percent":92,"kind":"test"}"#)
+            let beforeGrade = model.balance
+            check("grades: a picture is sent to Claude", model.submitGrade(gradePicture(1)) == nil)
+            _ = await wait { model.rewards.grades.last?.decision != nil }
+            check("grades: a 92% test earns 3 credits", model.rewards.grades.last?.decision == .accepted
+                  && abs(model.balance - beforeGrade - 3) < 0.01, "\(String(describing: model.rewards.grades.last))")
+            check("grades: the picture is kept", model.rewards.grades.last.map {
+                FileManager.default.fileExists(atPath: model.gradePicture($0).path) } == true)
+            check("grades: the same file is refused", model.submitGrade(gradePicture(1)) != nil)
+            check("grades: the same picture at half size is refused", model.submitGrade(gradePicture(1, scale: 0.5)) != nil)
+            check("grades: a different picture goes to Claude", model.submitGrade(gradePicture(2)) == nil)
+            _ = await wait { model.rewards.grades.last?.decision != nil }
+            check("grades: the same test from another picture counts once", model.rewards.grades.last?.decision == .duplicate
+                  && abs(model.balance - beforeGrade - 3) < 0.01)
+            check("grades: anything but a picture is refused", model.submitGrade(proofFile) != nil)
+            model.settings.claudePath = fakeClaude("claude-grade-reject", #"{"verdict":"reject","reason":"There's no mark on it.","percent":0,"kind":"assignment"}"#)
+            _ = model.submitGrade(gradePicture(3))
+            _ = await wait { model.rewards.grades.last?.decision != nil }
+            check("grades: unmarked work is rejected, no credits", model.rewards.grades.last?.decision == .rejected
+                  && abs(model.balance - beforeGrade - 3) < 0.01)
+            check("grades: a rejected picture can be shown again", model.submitGrade(gradePicture(3)) == nil)
+            _ = await wait { model.rewards.grades.last?.decision != nil }
+
             model.settings.claudePath = realClaude
             let onDisk = model.store.loadRewards()
             // Dates are saved to the second, so compare what matters.

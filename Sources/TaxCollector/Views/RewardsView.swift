@@ -136,6 +136,8 @@ private struct WalletTab: View {
                 if let message { message.view }
             }
 
+            GradesSection()
+
             Section("History") {
                 if model.rewards.ledger.isEmpty {
                     Text("Nothing yet. Credits show up here when your proof is accepted.")
@@ -181,6 +183,7 @@ private struct LedgerRow: View {
         case .wish: "Bought"
         case .refund: "Refund"
         case .guardian: entry.amount >= 0 ? "From your guardian" : "Taken by your guardian"
+        case .grade: "Grade"
         }
     }
 
@@ -191,6 +194,7 @@ private struct LedgerRow: View {
         case .wish: "gift"
         case .refund: "arrow.uturn.backward"
         case .guardian: "person.badge.key"
+        case .grade: "rosette"
         }
     }
 }
@@ -574,6 +578,92 @@ private struct WishlistTab: View {
 // MARK: Shared
 
 /// A line under a control: why something didn't work, or what just happened.
+// MARK: Grades
+
+/// Show a picture of a marked test or rubric; Claude reads it and it earns credits once.
+private struct GradesSection: View {
+    @Environment(AppModel.self) private var model
+    @State private var message: RewardsMessage?
+
+    var body: some View {
+        Section {
+            HStack(alignment: .top) {
+                Text("Show a screenshot or photo of a marked test, quiz or rubric. A test earns 2 credits, a quiz 1 and other marked work 0.5, times 1.5 for 90% and up, 1 for 80s, 0.5 for 70s. Each one counts once, from any picture of it.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                Button("Show a Grade…", action: choose)
+            }
+            if let message { message.view }
+            ForEach(model.rewards.grades.reversed().prefix(20)) { row($0) }
+        } header: {
+            Text("Grades")
+        }
+    }
+
+    private func choose() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a picture of the marked work"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if let why = model.submitGrade(url) {
+            message = .error(why)
+        } else {
+            message = .info("Claude is reading it.")
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ g: GradeClaim) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: symbol(g))
+                .foregroundStyle(color(g))
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(g.assessment.isEmpty ? "Marked work" : g.assessment).fontWeight(.medium)
+                let detail = [g.course, g.score].filter { !$0.isEmpty }.joined(separator: " · ")
+                if !detail.isEmpty { Text(detail).font(.caption).foregroundStyle(.secondary) }
+                if g.decision == nil {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Claude is reading it…").font(.caption).foregroundStyle(.secondary)
+                    }
+                } else if !g.reason.isEmpty {
+                    Text(g.reason).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer()
+            if g.decision == .accepted {
+                Text(g.credits > 0 ? "+\(Credits.format(g.credits))" : "No credits")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(g.credits > 0 ? .green : .secondary)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func symbol(_ g: GradeClaim) -> String {
+        switch g.decision {
+        case nil: "hourglass"
+        case .accepted?: "rosette"
+        case .rejected?: "xmark.circle"
+        case .duplicate?: "doc.on.doc"
+        case .error?: "exclamationmark.triangle"
+        }
+    }
+
+    private func color(_ g: GradeClaim) -> Color {
+        switch g.decision {
+        case .accepted?: .green
+        case .rejected?, .duplicate?: .secondary
+        case .error?: .orange
+        case nil: .secondary
+        }
+    }
+}
+
 enum RewardsMessage: Equatable {
     case error(String)
     case info(String)

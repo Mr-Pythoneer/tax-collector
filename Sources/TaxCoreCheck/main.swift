@@ -1,8 +1,11 @@
 // Runs the TaxCore checks. Swift Testing can't discover tests under Command Line Tools
 // alone, so this is a plain executable: `swift run taxcore-check`.
+import CoreGraphics
 import CryptoKit
 import Foundation
+import ImageIO
 import TaxCore
+import UniformTypeIdentifiers
 
 nonisolated(unsafe) var failures = 0
 nonisolated(unsafe) var current = ""
@@ -1733,6 +1736,91 @@ extension AssignmentCenterImport {
     }
 }
 
+struct GradeRules {
+    /// A made-up "rubric": stripes and blocks whose layout depends on `seed`.
+    func picture(seed: Int, width: Int = 800, height: Int = 600) -> CGImage {
+        let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        var r = UInt64(seed * 7919 + 17)
+        for _ in 0..<14 {
+            r = r &* 6364136223846793005 &+ 1442695040888963407
+            let x = Double(r % UInt64(width)), y = Double((r >> 16) % UInt64(height))
+            let w = Double(60 + (r >> 32) % 300), h = Double(30 + (r >> 40) % 200)
+            let shade = Double((r >> 48) % 200) / 255
+            ctx.setFillColor(CGColor(red: shade, green: shade * 0.8, blue: 0.3, alpha: 1))
+            ctx.fill(CGRect(x: x, y: y, width: w, height: h))
+        }
+        return ctx.makeImage()!
+    }
+
+    func png(_ image: CGImage) -> Data {
+        let data = NSMutableData()
+        let dest = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(dest, image, nil)
+        CGImageDestinationFinalize(dest)
+        return data as Data
+    }
+
+    func scaled(_ image: CGImage, by f: Double) -> CGImage {
+        let w = Int(Double(image.width) * f), h = Int(Double(image.height) * f)
+        let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.interpolationQuality = .high
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return ctx.makeImage()!
+    }
+
+    func creditsByMarkAndKind() {
+        expect(Grades.credits(percent: 92, kind: .test, earnRate: 1) == 3)
+        expect(Grades.credits(percent: 85, kind: .quiz, earnRate: 1) == 1)
+        expect(Grades.credits(percent: 75, kind: .assignment, earnRate: 1) == 0.3)   // 0.25 rounds to 0.3
+        expect(Grades.credits(percent: 69.9, kind: .test, earnRate: 2) == 0)
+        expect(Grades.credits(percent: 100, kind: .test, earnRate: 2) == 6)
+    }
+
+    func samePictureIsRecognised() {
+        let a = picture(seed: 1)
+        let ha = Grades.pictureHash(of: png(a))!
+        let halfSize = Grades.pictureHash(of: png(scaled(a, by: 0.5)))!
+        let other = Grades.pictureHash(of: png(picture(seed: 2)))!
+        expect(Grades.distance(ha, halfSize) <= Grades.samePictureBits)
+        expect(Grades.distance(ha, other) > Grades.samePictureBits)
+        let shown = GradeClaim(at: Date(), file: "a.png", fileHash: "abc", pictureHash: ha, decision: .accepted,
+                               course: "Math", assessment: "Unit 1 Test")
+        expect(Grades.refusal(fileHash: "abc", pictureHash: nil, among: [shown]) != nil)          // the same file
+        expect(Grades.refusal(fileHash: "def", pictureHash: halfSize, among: [shown]) != nil)     // re-saved smaller
+        expect(Grades.refusal(fileHash: "def", pictureHash: other, among: [shown]) == nil)        // a different picture
+        // A rejected or unreadable picture doesn't block trying again.
+        var rejected = shown
+        rejected.decision = .rejected
+        expect(Grades.refusal(fileHash: "abc", pictureHash: ha, among: [rejected]) == nil)
+        // The same assessment from a different picture counts once.
+        let again = GradeClaim(at: Date(), file: "b.png", fileHash: "ghi", pictureHash: other, decision: nil,
+                               course: "math", assessment: "Unit 1 test!")
+        expect(Grades.alreadyCounted(again, among: [shown, again])?.id == shown.id)
+        let different = GradeClaim(at: Date(), file: "c.png", fileHash: "jkl", pictureHash: other,
+                                   course: "Math", assessment: "Unit 2 Test")
+        expect(Grades.alreadyCounted(different, among: [shown, different]) == nil)
+    }
+
+    func readingClaudesAnswer() {
+        func cli(_ text: String) -> Data {
+            try! JSONSerialization.data(withJSONObject: ["type": "result", "is_error": false, "result": text])
+        }
+        if case let .success(r) = Auditor.parseGrade(cliOutput: cli(#"{"verdict":"accept","reason":"Clear mark.","course":"Science 8","assessment":"Cells Quiz","score":"18/20","percent":"90","kind":"Quiz"}"#)) {
+            expect(r.accepted && r.percent == 90 && r.kind == .quiz && r.assessment == "Cells Quiz")
+        } else { expect(false) }
+        if case let .success(r) = Auditor.parseGrade(cliOutput: cli(#"{"verdict":"reject","reason":"No mark on it.","percent":250}"#)) {
+            expect(!r.accepted && r.percent == 100)
+        } else { expect(false) }
+        if case .success = Auditor.parseGrade(cliOutput: cli(#"{"reason":"?"}"#)) { expect(false) }
+        expect(Auditor.gradePrompt(files: ["/x/grade.png"], alreadyCounted: ["Math | Unit 1 Test"], note: "")
+               .contains("- Math | Unit 1 Test"))
+    }
+}
+
 struct RewardsRules {
     private func accepted(at offset: TimeInterval, grade: Int? = 90, size: WorkSize? = .medium,
                           verdict: Verdict = .accepted) -> ProofSubmission {
@@ -2051,6 +2139,9 @@ struct RewardsRules {
 }
 
 let checks: [(String, () -> Void)] = [
+    ("GradeRules.creditsByMarkAndKind", { GradeRules().creditsByMarkAndKind() }),
+    ("GradeRules.samePictureIsRecognised", { GradeRules().samePictureIsRecognised() }),
+    ("GradeRules.readingClaudesAnswer", { GradeRules().readingClaudesAnswer() }),
     ("AssignmentCenterImport.rowsBecomeAssignments", { AssignmentCenterImport().rowsBecomeAssignments() }),
     ("AssignmentCenterImport.eachAssignmentOnce", { AssignmentCenterImport().eachAssignmentOnce() }),
     ("AssignmentCenterImport.signingInDoesntDuplicate", { AssignmentCenterImport().signingInDoesntDuplicate() }),

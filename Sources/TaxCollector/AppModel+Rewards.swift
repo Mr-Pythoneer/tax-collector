@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import TaxCore
 
 /// Credits, free time, the watchlist, research passes and the wishlist (rules in TaxCore/Rewards.swift).
@@ -276,6 +277,84 @@ extension AppModel {
         store.log("WISHLIST removed \"\(rewards.wishes[i].name)\"")
         rewards.wishes.remove(at: i)
         saveRewards()
+    }
+
+    // MARK: Grades
+
+    static let gradeImageTypes: Set<String> = ["png", "jpg", "jpeg", "heic", "heif", "gif", "tiff", "tif", "webp", "bmp"]
+
+    /// Shows a picture of marked work for credits. nil when it went to Claude, otherwise why not.
+    func submitGrade(_ file: URL, note: String = "") -> String? {
+        guard Self.gradeImageTypes.contains(file.pathExtension.lowercased()) else {
+            return "Choose a picture (a screenshot or photo) of the marked work."
+        }
+        guard let data = try? Data(contentsOf: file), !data.isEmpty else { return "That picture couldn't be opened." }
+        let fileHash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let pictureHash = Grades.pictureHash(of: data)
+        if let why = Grades.refusal(fileHash: fileHash, pictureHash: pictureHash, among: rewards.grades) {
+            store.log("GRADE refused \(file.lastPathComponent): \(why)")
+            return why
+        }
+        var claim = GradeClaim(at: now, file: "grade." + file.pathExtension.lowercased(), fileHash: fileHash,
+                               pictureHash: pictureHash)
+        let folder = store.dir.appendingPathComponent("grades/\(claim.id.uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let saved = folder.appendingPathComponent(claim.file)
+        do { try data.write(to: saved) } catch { return "The picture couldn't be saved: \(error.localizedDescription)" }
+        claim.reason = ""
+        rewards.grades.append(claim)
+        saveRewards()
+        store.log("GRADE sent \(file.lastPathComponent) to Claude")
+        let counted = rewards.grades.filter { $0.decision == .accepted }.map { "\($0.course) | \($0.assessment)" }
+        let settings = self.settings
+        let tokenFile = self.tokenFile
+        let id = claim.id
+        Task {
+            let result = await ProofVerifier.readGrade(files: [saved.path], alreadyCounted: counted, note: note,
+                                                       folder: folder, settings: settings, tokenFile: tokenFile)
+            self.recordGrade(id, result: result)
+        }
+        return nil
+    }
+
+    private func recordGrade(_ id: UUID, result: Result<Auditor.GradeReading, ProofVerifier.Problem>) {
+        guard let i = rewards.grades.firstIndex(where: { $0.id == id }) else { return }
+        switch result {
+        case let .failure(problem):
+            rewards.grades[i].decision = .error
+            rewards.grades[i].reason = problem.message
+        case let .success(reading):
+            rewards.grades[i].course = reading.course
+            rewards.grades[i].assessment = reading.assessment
+            rewards.grades[i].score = reading.score
+            rewards.grades[i].percent = reading.percent
+            rewards.grades[i].kind = reading.kind
+            rewards.grades[i].reason = reading.reason
+            if !reading.accepted {
+                rewards.grades[i].decision = .rejected
+            } else if let earlier = Grades.alreadyCounted(rewards.grades[i], among: rewards.grades) {
+                rewards.grades[i].decision = .duplicate
+                rewards.grades[i].reason = "\(earlier.assessment) already counted on \(earlier.at.formatted(date: .abbreviated, time: .omitted))."
+            } else {
+                let credits = Grades.credits(percent: reading.percent ?? 0, kind: reading.kind ?? .assignment,
+                                             earnRate: settings.earnRate)
+                rewards.grades[i].decision = .accepted
+                rewards.grades[i].credits = credits
+                if credits > 0 {
+                    let g = rewards.grades[i]
+                    rewards.ledger.append(LedgerEntry(at: now, amount: credits, kind: .grade,
+                                                      note: "\(g.course): \(g.assessment) (\(g.score))"))
+                    onRewardsNotice("You earned \(Credits.format(credits)) for \(g.assessment).")
+                }
+            }
+        }
+        saveRewards()
+        let g = rewards.grades[i]
+        store.log("GRADE \(g.decision?.rawValue ?? "?") \(g.course) | \(g.assessment) \(g.score) +\(g.credits): \(g.reason)")
+    }
+
+    func gradePicture(_ claim: GradeClaim) -> URL {
+        store.dir.appendingPathComponent("grades/\(claim.id.uuidString)/\(claim.file)")
     }
 
     // MARK: Guardian

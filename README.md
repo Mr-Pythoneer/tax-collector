@@ -179,6 +179,14 @@ Tax Collector also pays you for doing work early. Open **Tax Collector → Rewar
 - Timing uses the first deadline, so an extension doesn't earn more.
 - The guardian can change the earning rate (×0.5 to ×2).
 
+**Grades.** In **Rewards → Wallet → Grades**, **Show a Grade…** takes a screenshot or photo of a marked test, quiz or rubric. Claude checks it's a real marked result (not blank, not edited, not someone else's) and reads the class, the assessment and the mark. It earns a test (or exam, or big project) 2 credits, a quiz 1 and other marked work 0.5, times 1.5 for 90% and up, 1 in the 80s, 0.5 in the 70s and nothing below, times the guardian's earning rate. A 92% test earns 3 credits. Each one counts once:
+
+- the very same file is refused (its SHA-256 is kept);
+- the same picture re-saved, scaled or slightly cropped is refused (a 64-bit picture fingerprint is kept);
+- the same class and assessment counts once, from any picture: Claude is also told what's already counted.
+
+A rejected picture doesn't count against you, so you can show a clearer one. Every picture is kept in `grades/` for the guardian to look at.
+
 **Free time.** 1 credit = 30 minutes. Buy time in 15-minute steps; it goes into **time left**.
 
 - While you're **signed in**, everything on your watchlist is open and time left counts down. The menu bar shows how much is left.
@@ -255,6 +263,7 @@ Everything lives in `~/Library/Application Support/TaxCollector/`:
 - `teams.json`, which holds what Teams last said about each imported assignment and which ones you deleted
 - `rewards.json`, which holds your credits (every move in and out), time left, the watchlist, school passes and the wishlist
 - `passes/` and `wishlist/`, which hold Claude's raw answers about school passes and wishlist prices
+- `grades/<id>/`, which holds each grade picture you showed, with Claude's answer
 - `teams-session.plist`, which holds your Microsoft sign-in cookies so Teams import survives restarts. It's readable only by your account, and **Sign Out of Teams** deletes it.
 - `guardian.json`, which holds only a salted PBKDF2 hash of the code
 - `parent-link.json`, which holds the server's address and setup code, this Mac's keys, and the paired phones. It's readable only by your account. A copy is kept in the app's preferences, so if the file is deleted, it comes back and the phones are told.
