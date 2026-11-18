@@ -1580,10 +1580,14 @@ struct AssignmentCenterImport {
                                       due: at(2026, 11, 14, 23, 59)),
         ]
         let out = Blackbaud.assignments(fromCenter: rows, allDayDueMinutes: -120, timeZone: tz)
-        expect(out.count == 2)
+        expect(out.count == 3)                                       // no date: left out; the same one twice: once
         expect(out.first?.uid == "center:1" && out.first?.title == "Mathematics 8 - MAT8 - 8D: Unit 2 Lesson 1")
         expect(out.first?.dueDate == at(2026, 11, 14, 23, 59))       // a real time stays
-        expect(out.last?.dueDate == at(2026, 11, 14, 22, 0))         // a whole day: 10 PM the evening before
+        expect(out.first { $0.uid == "center:2" }?.dueDate == at(2026, 11, 14, 22, 0))   // a whole day: 10 PM the evening before
+        expect(out.first { $0.uid == "center:3" }?.completedInBlackbaud == true)
+        // Completed in Blackbaud: never imported, but it still corrects a task you have.
+        let done = out.first { $0.uid == "center:3" }!
+        expect(Blackbaud.sync(tasks: [], state: BlackbaudState(), assignments: [done], now: at(2026, 11, 1)).added.isEmpty)
     }
 
     func eachAssignmentOnce() {

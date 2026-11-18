@@ -8,6 +8,8 @@ public struct BlackbaudAssignment: Codable, Equatable, Sendable {
     public var dueDate: Date
     /// When it was set, from Blackbaud's own list (the feed doesn't say).
     public var assignedDate: Date?
+    /// Marked Completed in Blackbaud. Never imported, but its date still corrects a task you already have.
+    public var completedInBlackbaud: Bool?
 
     public init(uid: String, title: String, details: String = "", dueDate: Date, assignedDate: Date? = nil) {
         self.uid = uid
@@ -138,7 +140,7 @@ public enum Blackbaud {
         cal.timeZone = timeZone
         var seen = Set<Int>()
         return items.compactMap { item in
-            guard let due = item.due, item.status != 1, seen.insert(item.indexID).inserted else { return nil }
+            guard let due = item.due, seen.insert(item.indexID).inserted else { return nil }
             let name = plainText(item.title)
             let course = plainText(item.course)
             guard !name.isEmpty else { return nil }
@@ -148,8 +150,10 @@ public enum Blackbaud {
                let whole = resolve(.allDay(year: y, month: m, day: d), allDayDueMinutes: allDayDueMinutes, timeZone: timeZone) {
                 dueDate = whole
             }
-            return BlackbaudAssignment(uid: "center:\(item.indexID)", title: course.isEmpty ? name : "\(course): \(name)",
-                                       dueDate: dueDate, assignedDate: item.assigned)
+            var out = BlackbaudAssignment(uid: "center:\(item.indexID)", title: course.isEmpty ? name : "\(course): \(name)",
+                                          dueDate: dueDate, assignedDate: item.assigned)
+            if item.status == 1 { out.completedInBlackbaud = true }
+            return out
         }
     }
 
@@ -338,6 +342,8 @@ public enum Blackbaud {
                 } else {
                     notes.append("kept \"\(original.title)\" as is: it's locked in and the feed's change would loosen it")
                 }
+            } else if item.completedInBlackbaud == true {
+                continue
             } else if !state.isDismissed(item), item.dueDate > now,
                       let other = earlierCopy(of: item, tasks: tasks, state: state, listedUIDs: Set(assignments.map(\.uid))),
                       !tasks[other].isFromBlackbaud {
