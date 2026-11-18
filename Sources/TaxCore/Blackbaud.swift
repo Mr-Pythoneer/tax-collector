@@ -196,9 +196,67 @@ public enum Blackbaud {
                 let feedDate = state.lastSeen[uid]?.dueDate ?? task.dueDate
                 return abs(feedDate.timeIntervalSince(set)) <= BlackbaudMatch.dueSlack
             case .teams, .manual:
-                return abs(task.dueDate.timeIntervalSince(item.dueDate)) <= BlackbaudMatch.dueSlack
+                return sameWorkScore(item, task) != nil
             }
         }
+    }
+
+    /// The class's first part, which Blackbaud and Teams name the same ("Mathematics" of "Mathematics - MTH1W - MS - 1").
+    static func courseKey(_ title: String) -> String {
+        let course = BlackbaudMatch.split(plainText(title)).course ?? ""
+        return BlackbaudMatch.normalized(String(course.split(separator: "-").first ?? ""))
+    }
+
+    private static let filler: Set<String> = ["and", "the", "a", "an", "of", "to", "in", "for", "on", "with"]
+
+    /// The words of the assignment's name, without the class.
+    static func nameWords(_ title: String) -> Set<String> {
+        let name = BlackbaudMatch.split(plainText(title)).name.lowercased()
+        let words = name.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        return Set(words).subtracting(filler)
+    }
+
+    /// How sure it is that a Blackbaud assignment and a Teams (or typed-in) task are the same work, or nil.
+    /// Teachers post the same work in both, worded differently ("Lesson 1: Collecting Like Terms" in Teams,
+    /// "Algebra - Lesson 1 Collecting Like Terms" in Blackbaud), so: the same class, and either the same due
+    /// time (within an hour) with most of the shorter name's words in the other, or the same name due within a
+    /// day and a half.
+    static func sameWorkScore(_ item: BlackbaudAssignment, _ task: TaxTask) -> Double? {
+        guard courseKey(item.title) == courseKey(task.title) || courseKey(task.title).isEmpty else { return nil }
+        let gap = abs(task.dueDate.timeIntervalSince(item.dueDate))
+        let a = nameWords(item.title), b = nameWords(task.title)
+        guard !a.isEmpty, !b.isEmpty else { return nil }
+        let overlap = Double(a.intersection(b).count) / Double(min(a.count, b.count))
+        if gap <= 3600 && overlap >= 0.6 { return overlap }
+        if gap <= BlackbaudMatch.dueSlack && a == b { return 1 }
+        return nil
+    }
+
+    /// Blackbaud assignments paired with the Teams or typed-in task that is the same work: best match first,
+    /// each task at most once, so two pieces of work due the same day go to the right tasks.
+    static func crossSourcePairs(items: [(index: Int, item: BlackbaudAssignment)], tasks: [TaxTask],
+                                 allowed: (Int) -> Bool = { _ in true }) -> [Int: Int] {
+        var candidates: [(n: Int, i: Int, score: Double, gap: TimeInterval)] = []
+        for (n, item) in items {
+            for (i, task) in tasks.enumerated() where allowed(i) {
+                switch task.source {
+                case .teams, .manual:
+                    if let score = sameWorkScore(item, task) {
+                        candidates.append((n, i, score, abs(task.dueDate.timeIntervalSince(item.dueDate))))
+                    }
+                case .blackbaud:
+                    continue
+                }
+            }
+        }
+        var out: [Int: Int] = [:]
+        var used = Set<Int>()
+        for c in candidates.sorted(by: { $0.score != $1.score ? $0.score > $1.score : $0.gap < $1.gap })
+        where out[c.n] == nil && !used.contains(c.i) {
+            out[c.n] = c.i
+            used.insert(c.i)
+        }
+        return out
     }
 
     /// DUE when there is one. Otherwise the start, unless the event stretches over days
@@ -301,6 +359,9 @@ public enum Blackbaud {
         var seenUIDs = Set<String>()
         let assignments = assignments.filter { seenUIDs.insert($0.uid).inserted }
         let owner = matchTasks(tasks: tasks, state: state, assignments: assignments)
+        let alsoInTeams = crossSourcePairs(
+            items: assignments.enumerated().filter { owner[$0.offset] == nil && $0.element.isFromCenter }.map { ($0.offset, $0.element) },
+            tasks: tasks)
 
         for (n, item) in assignments.enumerated() {
             if let i = owner[n] {
@@ -344,9 +405,7 @@ public enum Blackbaud {
                 }
             } else if item.completedInBlackbaud == true {
                 continue
-            } else if !state.isDismissed(item), item.dueDate > now,
-                      let other = earlierCopy(of: item, tasks: tasks, state: state, listedUIDs: Set(assignments.map(\.uid))),
-                      !tasks[other].isFromBlackbaud {
+            } else if !state.isDismissed(item), item.dueDate > now, let other = alsoInTeams[n] {
                 // Already a task from Teams (or typed in): don't make a second one.
                 state.dismissed.insert(item.uid)
                 notes.append("skipped \"\(item.title)\": it's already a task (\"\(tasks[other].title)\")")
@@ -435,10 +494,20 @@ public enum Blackbaud {
         }
         // A copy imported from Blackbaud's own list of work that was already a task (from the feed, dated the day
         // it was set, or from Teams). Only copies with no proof that aren't done; the older task stays.
+        var centerCopies: [(index: Int, item: BlackbaudAssignment)] = []
         for (i, task) in tasks.enumerated() where !drop.contains(i) && task.isPending && task.proofs.isEmpty {
             guard case let .blackbaud(uid) = task.source, let seen = state.lastSeen[uid], seen.isFromCenter else { continue }
             let others = Set(tasks.indices.filter { tasks[$0].createdAt >= task.createdAt || drop.contains($0) })
-            if earlierCopy(of: seen, tasks: tasks, state: state, excluding: others) != nil { drop.insert(i) }
+            if earlierCopy(of: seen, tasks: tasks, state: state, excluding: others) != nil {
+                drop.insert(i)
+            } else {
+                centerCopies.append((i, seen))
+            }
+        }
+        // The same work already a task from Teams (made before this copy).
+        for (i, other) in crossSourcePairs(items: centerCopies, tasks: tasks, allowed: { !drop.contains($0) })
+        where tasks[other].createdAt < tasks[i].createdAt {
+            drop.insert(i)
         }
         let removed = drop.sorted().map { tasks[$0] }
         return (tasks.enumerated().filter { !drop.contains($0.offset) }.map(\.element), removed)

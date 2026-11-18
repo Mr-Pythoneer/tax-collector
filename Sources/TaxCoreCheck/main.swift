@@ -1622,6 +1622,46 @@ struct AssignmentCenterImport {
 }
 
 extension AssignmentCenterImport {
+    func sameWorkInTeamsAndBlackbaud() {
+        let now = at(2026, 11, 18, 18)
+        func teams(_ title: String, _ due: Date) -> TaxTask {
+            TaxTask(title: title, dueDate: due, createdAt: at(2026, 11, 17), source: .teams(id: title))
+        }
+        let dec4 = at(2026, 12, 4, 16)
+        let teamsTasks = [
+            teams("Mathematics: Lesson 1: Collecting Like Terms", at(2026, 11, 20, 16)),
+            teams("Mathematics: Lesson 5: Distributive Property", dec4),
+            teams("Mathematics: Algebra: L3, 4 & 5 Distributive Property, Solving Equations", dec4),
+            teams("Mathematics: Test: Algebra (Date TBC)", at(2027, 1, 13, 8, 30)),
+            teams("Science 8: Lab", at(2026, 11, 21, 16)),
+        ]
+        func center(_ id: Int, _ title: String, _ due: Date) -> BlackbaudAssignment {
+            BlackbaudAssignment(uid: "center:\(id)", title: title, dueDate: due, assignedDate: at(2026, 11, 17))
+        }
+        let listed = [
+            center(1, "Mathematics - MTH1W - MS - 1: Algebra - Lesson 1 Collecting Like Terms", at(2026, 11, 20, 16)),
+            center(5, "Mathematics - MTH1W - MS - 1: Algebra - Lesson 5 Distributive Property", dec4),
+            center(6, "Mathematics - MTH1W - MS - 1: Algebra - Microsoft Form Found in Teams Assignments - L3, 4, and 5 One-Step, Multi-Step Equations and Distributive Property", dec4),
+            center(9, "Mathematics - MTH1W - MS - 1: Test Date: Algebra", at(2027, 1, 13, 8, 30)),
+            center(10, "Mathematics - MTH1W - MS - 1: Algebra - Lesson 2 Adding and Subtracting Polynomials", at(2026, 11, 24, 16)),
+            center(11, "Science 8- SNC8 - 8D: Levels of Organizations - Cells, Tissues, Organs", at(2026, 11, 19, 10, 10)),
+        ]
+        let r = Blackbaud.sync(tasks: teamsTasks, state: BlackbaudState(), assignments: listed, now: now)
+        // Only the two that aren't in Teams are new.
+        expect(Set(r.added.map(\.title)) == ["Mathematics - MTH1W - MS - 1: Algebra - Lesson 2 Adding and Subtracting Polynomials",
+                                             "Science 8- SNC8 - 8D: Levels of Organizations - Cells, Tissues, Organs"])
+        expect(r.state.dismissed.isSuperset(of: ["center:1", "center:5", "center:6", "center:9"]))
+        // Copies 0.10.5 already made are removed, each against the right Teams task.
+        var state = BlackbaudState()
+        var copies: [TaxTask] = []
+        for item in listed.prefix(4) {
+            state.lastSeen[item.uid] = item
+            copies.append(TaxTask(title: item.title, dueDate: item.dueDate, createdAt: at(2026, 11, 18), source: .blackbaud(uid: item.uid)))
+        }
+        let merged = Blackbaud.mergeDuplicates(teamsTasks + copies, state: state)
+        expect(merged.removed.count == 4 && merged.tasks.count == teamsTasks.count)
+    }
+
     func realDateWinsOverFeedDate() {
         // Tonight's case: the feed moved a task to the evening it was set (inside 24 hours, so locked in).
         let now = at(2026, 11, 18, 17, 45)
@@ -2016,6 +2056,7 @@ let checks: [(String, () -> Void)] = [
     ("AssignmentCenterImport.signingInDoesntDuplicate", { AssignmentCenterImport().signingInDoesntDuplicate() }),
     ("AssignmentCenterImport.workYouAlreadyHave", { AssignmentCenterImport().workYouAlreadyHave() }),
     ("AssignmentCenterImport.realDateWinsOverFeedDate", { AssignmentCenterImport().realDateWinsOverFeedDate() }),
+    ("AssignmentCenterImport.sameWorkInTeamsAndBlackbaud", { AssignmentCenterImport().sameWorkInTeamsAndBlackbaud() }),
     ("RewardsRules.earlierEarnsMore", { RewardsRules().earlierEarnsMore() }),
     ("RewardsRules.lateAndExcusedEarnNothing", { RewardsRules().lateAndExcusedEarnNothing() }),
     ("RewardsRules.guardianAndMissingGrades", { RewardsRules().guardianAndMissingGrades() }),

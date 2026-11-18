@@ -614,7 +614,7 @@ final class AppModel {
             }
             if let center {
                 self.importFeed([], center: center)
-            } else if self.lastCenterSummary != "signed out" {
+            } else if self.blackbaudSignInChecked && self.lastCenterSummary != "signed out" {
                 self.lastCenterSummary = "signed out"
                 self.store.log("FEED nothing imported or changed: signed out of Blackbaud, and the feed's dates are the day work was set, not when it's due")
             }
