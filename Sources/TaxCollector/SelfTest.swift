@@ -273,18 +273,40 @@ enum SelfTest {
         """
         let icsURL = dir.appendingPathComponent("selftest.ics")
         try? ics.write(to: icsURL, atomically: true, encoding: .utf8)
+        // The feed alone never makes tasks: its dates are the day work was set, not when it's due.
+        model.blackbaudSignedIn = false
+        model.blackbaudCenter = { nil }
+        let tasksBefore = model.tasks.count
         model.startFeed(icsURL)
-        _ = await wait { !model.feedSyncing && model.tasks.contains { $0.source == .blackbaud(uid: "selftest-lab") } }
-        let lab = model.tasks.first { $0.source == .blackbaud(uid: "selftest-lab") }
-        check("feed: upcoming assignments are imported", lab != nil && model.tasks.contains { $0.source == .blackbaud(uid: "selftest-reading") })
-        check("feed: past assignments are skipped", !model.tasks.contains { $0.source == .blackbaud(uid: "selftest-old") })
-        check("feed: text codes are decoded", lab?.details.contains("✅") == true && lab?.details.contains("&#") == false)
-        if let reading = model.tasks.first(where: { $0.source == .blackbaud(uid: "selftest-reading") }) {
+        _ = await wait(8) { !model.feedSyncing && model.blackbaud.lastSync == nil }
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        check("feed: signed out, the feed alone imports nothing", model.tasks.count == tasksBefore,
+              "\(model.tasks.count - tasksBefore) imported")
+        // Signed in, tasks come from Blackbaud's own list (a pretend one here), with real due times.
+        model.blackbaudSignedIn = true
+        model.blackbaudCenter = {
+            [BlackbaudListedAssignment(indexID: 101, title: "Lab report &#9989;", course: "Science 7- SCI7 - 7B",
+                                       due: Date().addingTimeInterval(3 * 86400), assigned: Date()),
+             BlackbaudListedAssignment(indexID: 102, title: "Reading log", course: "English 7 - ENG7 - 7B",
+                                       due: Date().addingTimeInterval(4 * 86400), assigned: Date()),
+             BlackbaudListedAssignment(indexID: 103, title: "Old thing", course: "Science 7- SCI7 - 7B",
+                                       due: Date().addingTimeInterval(-3 * 86400), assigned: Date().addingTimeInterval(-6 * 86400)),
+             BlackbaudListedAssignment(indexID: 104, title: "Done already", course: "Science 7- SCI7 - 7B",
+                                       due: Date().addingTimeInterval(2 * 86400), status: 1)]
+        }
+        model.syncFeed()
+        _ = await wait { !model.feedSyncing && model.tasks.contains { $0.source == .blackbaud(uid: "center:101") } }
+        let lab = model.tasks.first { $0.source == .blackbaud(uid: "center:101") }
+        check("feed: upcoming assignments are imported", lab != nil && model.tasks.contains { $0.source == .blackbaud(uid: "center:102") })
+        check("feed: past assignments are skipped", !model.tasks.contains { $0.source == .blackbaud(uid: "center:103") })
+        check("feed: work marked Completed in Blackbaud is skipped", !model.tasks.contains { $0.source == .blackbaud(uid: "center:104") })
+        check("feed: text codes are decoded", lab?.title.contains("✅") == true && lab?.title.contains("&#") == false)
+        if let reading = model.tasks.first(where: { $0.source == .blackbaud(uid: "center:102") }) {
             check("feed: an imported task days away can be deleted", model.delete(reading.id) == .saved)
             model.syncFeed()
             _ = await wait(5) { !model.feedSyncing }
             try? await Task.sleep(nanoseconds: 500_000_000)
-            check("feed: a deleted assignment isn't imported again", !model.tasks.contains { $0.source == .blackbaud(uid: "selftest-reading") })
+            check("feed: a deleted assignment isn't imported again", !model.tasks.contains { $0.source == .blackbaud(uid: "center:102") })
         }
 
         // Teams import, with a pretend Teams
@@ -316,6 +338,10 @@ enum SelfTest {
         if let lab {
             var marked: [String] = []
             model.blackbaudMarker = { task in marked.append(task.title); return nil }
+            // Blackbaud's list has no instructions; give it some, as an edit would.
+            if let i = model.tasks.firstIndex(where: { $0.id == lab.id }) {
+                model.tasks[i].details = "Write it up.\n- Hypothesis\n- Results ✅"
+            }
             model.approveLatestProof(lab.id)
             let paid = model.task(lab.id)
             check("last check: paid Blackbaud work waits for it", paid?.needsLastCheck == true)

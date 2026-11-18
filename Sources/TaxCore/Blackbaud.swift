@@ -309,6 +309,15 @@ public enum Blackbaud {
                 state.lastSeen[item.uid] = item
                 guard let before, before != item, tasks[i].isPending else { continue }
 
+                // The task's date came from the feed, which gives the day work was set. Blackbaud's own list has
+                // the real deadline: it's a correction, not a teacher's change, so the lock-in rule doesn't hold it back.
+                if item.isFromCenter && !before.isFromCenter && item.dueDate > now && item.dueDate != tasks[i].dueDate {
+                    let was = tasks[i].dueDate
+                    tasks[i].dueDate = item.dueDate
+                    notes.append("corrected \"\(tasks[i].title)\" to due \(item.dueDate) (it said \(was), the day it was set)")
+                    continue
+                }
+
                 let original = tasks[i]
                 var edited = original
                 if item.title != before.title { edited.title = item.title }

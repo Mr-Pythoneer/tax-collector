@@ -1618,6 +1618,30 @@ struct AssignmentCenterImport {
 }
 
 extension AssignmentCenterImport {
+    func realDateWinsOverFeedDate() {
+        // Tonight's case: the feed moved a task to the evening it was set (inside 24 hours, so locked in).
+        let now = at(2026, 11, 18, 17, 45)
+        let feedItem = BlackbaudAssignment(uid: "f1", title: "Art & Design 8 - ADT8 - 8D: Translation Tessellation",
+                                           dueDate: at(2026, 11, 18, 21))
+        var state = BlackbaudState()
+        state.lastSeen["f1"] = feedItem
+        let task = TaxTask(title: feedItem.title, dueDate: feedItem.dueDate, createdAt: at(2026, 11, 11),
+                           source: .blackbaud(uid: "f1"))
+        let real = BlackbaudAssignment(uid: "center:7", title: feedItem.title, dueDate: at(2026, 11, 19, 13, 25),
+                                       assignedDate: at(2026, 11, 11))
+        let r = Blackbaud.sync(tasks: [task], state: state, assignments: [real], now: now)
+        expect(r.tasks.first?.dueDate == at(2026, 11, 19, 13, 25))
+        expect(r.tasks.first?.source == .blackbaud(uid: "center:7") && r.added.isEmpty)
+        // A teacher's later change to a locked-in task still needs the guardian.
+        var later = real
+        later.dueDate = at(2026, 11, 20, 13, 25)
+        let r2 = Blackbaud.sync(tasks: [TaxTask(title: real.title, dueDate: real.dueDate, createdAt: at(2026, 11, 11),
+                                                source: .blackbaud(uid: "center:7"))],
+                                state: { var s = BlackbaudState(); s.lastSeen["center:7"] = real; return s }(),
+                                assignments: [later], now: at(2026, 11, 19, 0))
+        expect(r2.tasks.first?.dueDate == at(2026, 11, 19, 13, 25))
+    }
+
     func workYouAlreadyHave() {
         let now = at(2026, 11, 11, 22)
         // Imported from the feed on the day it was set (the feed's date), and proven already.
@@ -1987,6 +2011,7 @@ let checks: [(String, () -> Void)] = [
     ("AssignmentCenterImport.eachAssignmentOnce", { AssignmentCenterImport().eachAssignmentOnce() }),
     ("AssignmentCenterImport.signingInDoesntDuplicate", { AssignmentCenterImport().signingInDoesntDuplicate() }),
     ("AssignmentCenterImport.workYouAlreadyHave", { AssignmentCenterImport().workYouAlreadyHave() }),
+    ("AssignmentCenterImport.realDateWinsOverFeedDate", { AssignmentCenterImport().realDateWinsOverFeedDate() }),
     ("RewardsRules.earlierEarnsMore", { RewardsRules().earlierEarnsMore() }),
     ("RewardsRules.lateAndExcusedEarnNothing", { RewardsRules().lateAndExcusedEarnNothing() }),
     ("RewardsRules.guardianAndMissingGrades", { RewardsRules().guardianAndMissingGrades() }),

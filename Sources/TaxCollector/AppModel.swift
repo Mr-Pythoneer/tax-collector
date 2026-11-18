@@ -604,13 +604,19 @@ final class AppModel {
                 if summary != self.lastCenterSummary { self.store.log(summary) }
                 self.lastCenterSummary = summary
             }
-            switch outcome {
-            case let .events(events):
-                self.importFeed(events, center: center ?? [])
-            case let .failed(message):
+            // The feed's date is the day work was set, not when it's due, so it never makes or changes tasks.
+            // It's only checked to say whether Blackbaud can be reached. Tasks come from Blackbaud's own list.
+            if case let .failed(message) = outcome {
                 if self.feedError != message { self.store.log("FEED failed (\(Blackbaud.redacted(url))): \(message)") }
                 self.feedError = message
-                if let center, !center.isEmpty { self.importFeed([], center: center) }
+            } else {
+                self.feedError = nil
+            }
+            if let center {
+                self.importFeed([], center: center)
+            } else if self.lastCenterSummary != "signed out" {
+                self.lastCenterSummary = "signed out"
+                self.store.log("FEED nothing imported or changed: signed out of Blackbaud, and the feed's dates are the day work was set, not when it's due")
             }
         }
     }
