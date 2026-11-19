@@ -1773,19 +1773,19 @@ struct GradeRules {
     }
 
     func creditsByMarkAndKind() {
-        expect(Grades.credits(percent: 92, kind: .test, earnRate: 1) == 3)
-        expect(Grades.credits(percent: 85, kind: .quiz, earnRate: 1) == 1)
-        expect(Grades.credits(percent: 75, kind: .assignment, earnRate: 1) == 0.3)   // 0.25 rounds to 0.3
+        expect(Grades.credits(percent: 92, kind: .test, earnRate: 1) == 9)
+        expect(Grades.credits(percent: 85, kind: .quiz, earnRate: 1) == 2)
+        expect(Grades.credits(percent: 75, kind: .assignment, earnRate: 1) == 0.5)
         expect(Grades.credits(percent: 69.9, kind: .test, earnRate: 2) == 0)
-        expect(Grades.credits(percent: 100, kind: .test, earnRate: 2) == 6)
+        expect(Grades.credits(percent: 100, kind: .test, earnRate: 2) == 18)
         // IB MYP criterion levels go by band, not by percentage.
-        expect(Grades.credits(percent: 75, ibLevels: [6], kind: .test, earnRate: 1) == 2)       // 6/8: 5–6 band
-        expect(Grades.credits(percent: 87.5, ibLevels: [7, 8], kind: .test, earnRate: 1) == 3)  // 7–8 band
-        expect(Grades.credits(percent: 0, ibLevels: [6, 7], kind: .test, earnRate: 1) == 3)     // average 6.5 rounds to 7
-        expect(Grades.credits(percent: 0, ibLevels: [5, 5, 6], kind: .quiz, earnRate: 1) == 1)
-        expect(Grades.credits(percent: 50, ibLevels: [4], kind: .test, earnRate: 1) == 1)       // 3–4 band
+        expect(Grades.credits(percent: 75, ibLevels: [6], kind: .test, earnRate: 1) == 6)       // 6/8: 5–6 band
+        expect(Grades.credits(percent: 87.5, ibLevels: [7, 8], kind: .test, earnRate: 1) == 9)  // 7–8 band
+        expect(Grades.credits(percent: 0, ibLevels: [6, 7], kind: .test, earnRate: 1) == 9)     // average 6.5 rounds to 7
+        expect(Grades.credits(percent: 0, ibLevels: [5, 5, 6], kind: .quiz, earnRate: 1) == 2)
+        expect(Grades.credits(percent: 50, ibLevels: [4], kind: .test, earnRate: 1) == 3)       // 3–4 band
         expect(Grades.credits(percent: 25, ibLevels: [2, 2], kind: .test, earnRate: 1) == 0)
-        expect(Grades.credits(percent: 92, ibLevels: [], kind: .test, earnRate: 1) == 3)        // no levels: percentage
+        expect(Grades.credits(percent: 92, ibLevels: [], kind: .test, earnRate: 1) == 9)        // no levels: percentage
     }
 
     func samePictureIsRecognised() {

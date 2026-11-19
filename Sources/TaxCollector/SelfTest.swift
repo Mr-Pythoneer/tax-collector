@@ -825,8 +825,8 @@ enum SelfTest {
             let beforeGrade = model.balance
             check("grades: a picture is sent to Claude", model.submitGrade(gradePicture(1)) == nil)
             _ = await wait { model.rewards.grades.last?.decision != nil }
-            check("grades: a 92% test earns 3 credits", model.rewards.grades.last?.decision == .accepted
-                  && abs(model.balance - beforeGrade - 3) < 0.01, "\(String(describing: model.rewards.grades.last))")
+            check("grades: a 92% test earns 9 credits", model.rewards.grades.last?.decision == .accepted
+                  && abs(model.balance - beforeGrade - 9) < 0.01, "\(String(describing: model.rewards.grades.last))")
             check("grades: the picture is kept", model.rewards.grades.last.map {
                 FileManager.default.fileExists(atPath: model.gradePicture($0).path) } == true)
             check("grades: the same file is refused", model.submitGrade(gradePicture(1)) != nil)
@@ -834,20 +834,20 @@ enum SelfTest {
             check("grades: a different picture goes to Claude", model.submitGrade(gradePicture(2)) == nil)
             _ = await wait { model.rewards.grades.last?.decision != nil }
             check("grades: the same test from another picture counts once", model.rewards.grades.last?.decision == .duplicate
-                  && abs(model.balance - beforeGrade - 3) < 0.01)
+                  && abs(model.balance - beforeGrade - 9) < 0.01)
             check("grades: anything but a picture is refused", model.submitGrade(proofFile) != nil)
             model.settings.claudePath = fakeClaude("claude-grade-ib", #"{"verdict":"accept","reason":"Criterion levels are clear.","course":"Individuals and Societies","assessment":"Unit 2 Test","score":"A 6/8, D 5/8","percent":68.75,"levels":[6,5],"kind":"test"}"#)
             let beforeIB = model.balance
             check("grades: an IB-marked picture goes to Claude", model.submitGrade(gradePicture(4)) == nil)
             _ = await wait { model.rewards.grades.last?.decision != nil }
-            check("grades: an IB test at levels 6 and 5 earns 2 credits (not 0 for 69%)",
+            check("grades: an IB test at levels 6 and 5 earns 6 credits (not 0 for 69%)",
                   model.rewards.grades.last?.decision == .accepted && model.rewards.grades.last?.ibLevels == [6, 5]
-                  && abs(model.balance - beforeIB - 2) < 0.01, "\(String(describing: model.rewards.grades.last))")
+                  && abs(model.balance - beforeIB - 6) < 0.01, "\(String(describing: model.rewards.grades.last))")
             model.settings.claudePath = fakeClaude("claude-grade-reject", #"{"verdict":"reject","reason":"There's no mark on it.","percent":0,"kind":"assignment"}"#)
             _ = model.submitGrade(gradePicture(3))
             _ = await wait { model.rewards.grades.last?.decision != nil }
             check("grades: unmarked work is rejected, no credits", model.rewards.grades.last?.decision == .rejected
-                  && abs(model.balance - beforeIB - 2) < 0.01)
+                  && abs(model.balance - beforeIB - 6) < 0.01)
             check("grades: a rejected picture can be shown again", model.submitGrade(gradePicture(3)) == nil)
             _ = await wait { model.rewards.grades.last?.decision != nil }
 

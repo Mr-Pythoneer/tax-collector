@@ -654,9 +654,9 @@ public enum GradeKind: String, Codable, Equatable, Sendable, CaseIterable {
 
     public var weight: Double {
         switch self {
-        case .test: 2
-        case .quiz: 1
-        case .assignment: 0.5
+        case .test: 6
+        case .quiz: 2
+        case .assignment: 1
         }
     }
 }
