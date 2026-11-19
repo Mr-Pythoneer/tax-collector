@@ -179,7 +179,7 @@ Tax Collector also pays you for doing work early. Open **Tax Collector → Rewar
 - Timing uses the first deadline, so an extension doesn't earn more.
 - The guardian can change the earning rate (×0.5 to ×2).
 
-**Grades.** In **Rewards → Wallet → Grades**, **Show a Grade…** takes a screenshot or photo of a marked test, quiz or rubric. Claude checks it's a real marked result (not blank, not edited, not someone else's) and reads the class, the assessment and the mark. It earns a test (or exam, or big project) 2 credits, a quiz 1 and other marked work 0.5, times 1.5 for 90% and up, 1 in the 80s, 0.5 in the 70s and nothing below, times the guardian's earning rate. A 92% test earns 3 credits. Each one counts once:
+**Grades.** In **Rewards → Wallet → Grades**, **Show a Grade…** takes a screenshot or photo of a marked test, quiz or rubric. Claude checks it's a real marked result (not blank, not edited, not someone else's) and reads the class, the assessment and the mark. It earns a test (or exam, or big project) 2 credits, a quiz 1 and other marked work 0.5, times 1.5 for 90% and up, 1 in the 80s, 0.5 in the 70s and nothing below, times the guardian's earning rate. A 92% test earns 3 credits. Work marked with IB MYP criterion levels (0–8) counts by band instead, from the average level rounded: 7–8 is ×1.5, 5–6 ×1, 3–4 ×0.5, 0–2 nothing, so a test at 6/8 earns 2 credits rather than the 0.5 that 75% would. Each one counts once:
 
 - the very same file is refused (its SHA-256 is kept);
 - the same picture re-saved, scaled or slightly cropped is refused (a 64-bit picture fingerprint is kept);

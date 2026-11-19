@@ -328,6 +328,7 @@ extension AppModel {
             rewards.grades[i].assessment = reading.assessment
             rewards.grades[i].score = reading.score
             rewards.grades[i].percent = reading.percent
+            rewards.grades[i].ibLevels = reading.ibLevels.isEmpty ? nil : reading.ibLevels
             rewards.grades[i].kind = reading.kind
             rewards.grades[i].reason = reading.reason
             if !reading.accepted {
@@ -336,7 +337,7 @@ extension AppModel {
                 rewards.grades[i].decision = .duplicate
                 rewards.grades[i].reason = "\(earlier.assessment) already counted on \(earlier.at.formatted(date: .abbreviated, time: .omitted))."
             } else {
-                let credits = Grades.credits(percent: reading.percent ?? 0, kind: reading.kind ?? .assignment,
+                let credits = Grades.credits(percent: reading.percent ?? 0, ibLevels: reading.ibLevels, kind: reading.kind ?? .assignment,
                                              earnRate: settings.earnRate)
                 rewards.grades[i].decision = .accepted
                 rewards.grades[i].credits = credits

@@ -588,7 +588,7 @@ private struct GradesSection: View {
     var body: some View {
         Section {
             HStack(alignment: .top) {
-                Text("Show a screenshot or photo of a marked test, quiz or rubric. A test earns 2 credits, a quiz 1 and other marked work 0.5, times 1.5 for 90% and up, 1 for 80s, 0.5 for 70s. Each one counts once, from any picture of it.")
+                Text("Show a screenshot or photo of a marked test, quiz or rubric. A test earns 2 credits, a quiz 1 and other marked work 0.5, times 1.5 for 90% and up, 1 for 80s, 0.5 for 70s. IB criterion levels (0–8) count by band: 7–8 is ×1.5, 5–6 ×1, 3–4 ×0.5. Each one counts once, from any picture of it.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

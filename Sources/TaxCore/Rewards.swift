@@ -686,12 +686,15 @@ public struct GradeClaim: Codable, Identifiable, Equatable, Sendable {
     public var assessment: String
     public var score: String
     public var percent: Double?
+    /// IB MYP criterion levels (0–8 each), when the work was marked that way.
+    public var ibLevels: [Int]?
     public var kind: GradeKind?
     public var credits: Double
 
     public init(id: UUID = UUID(), at: Date, file: String, fileHash: String, pictureHash: UInt64?,
                 decision: Decision? = nil, reason: String = "", course: String = "", assessment: String = "",
-                score: String = "", percent: Double? = nil, kind: GradeKind? = nil, credits: Double = 0) {
+                score: String = "", percent: Double? = nil, ibLevels: [Int]? = nil, kind: GradeKind? = nil,
+                credits: Double = 0) {
         self.id = id
         self.at = at
         self.file = file
@@ -703,6 +706,7 @@ public struct GradeClaim: Codable, Identifiable, Equatable, Sendable {
         self.assessment = assessment
         self.score = score
         self.percent = percent
+        self.ibLevels = ibLevels
         self.kind = kind
         self.credits = credits
     }
@@ -725,9 +729,25 @@ public enum Grades {
         }
     }
 
-    public static func credits(percent: Double, kind: GradeKind, earnRate: Double) -> Double {
+    /// IB MYP achievement bands, from the average criterion level (rounded): 7–8 earns 1.5, 5–6 earns 1,
+    /// 3–4 earns 0.5, 0–2 nothing. A plain percentage would be harsh here (6 of 8 is only 75%).
+    public static func factor(ibLevels: [Int]) -> Double {
+        guard !ibLevels.isEmpty else { return 0 }
+        let levels = ibLevels.map { min(max($0, 0), 8) }
+        let average = (Double(levels.reduce(0, +)) / Double(levels.count)).rounded(.toNearestOrAwayFromZero)
+        switch average {
+        case 7...: return 1.5
+        case 5..<7: return 1
+        case 3..<5: return 0.5
+        default: return 0
+        }
+    }
+
+    /// IB criterion levels win over the percentage when Claude read any.
+    public static func credits(percent: Double, ibLevels: [Int]? = nil, kind: GradeKind, earnRate: Double) -> Double {
         let rate = min(max(earnRate, Credits.earnRateRange.lowerBound), Credits.earnRateRange.upperBound)
-        return Credits.rounded(kind.weight * factor(percent: percent) * rate)
+        let f = ibLevels.flatMap { $0.isEmpty ? nil : factor(ibLevels: $0) } ?? factor(percent: percent)
+        return Credits.rounded(kind.weight * f * rate)
     }
 
     public static func contentKey(course: String, assessment: String) -> String {

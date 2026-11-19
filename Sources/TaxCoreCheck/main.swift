@@ -1778,6 +1778,14 @@ struct GradeRules {
         expect(Grades.credits(percent: 75, kind: .assignment, earnRate: 1) == 0.3)   // 0.25 rounds to 0.3
         expect(Grades.credits(percent: 69.9, kind: .test, earnRate: 2) == 0)
         expect(Grades.credits(percent: 100, kind: .test, earnRate: 2) == 6)
+        // IB MYP criterion levels go by band, not by percentage.
+        expect(Grades.credits(percent: 75, ibLevels: [6], kind: .test, earnRate: 1) == 2)       // 6/8: 5–6 band
+        expect(Grades.credits(percent: 87.5, ibLevels: [7, 8], kind: .test, earnRate: 1) == 3)  // 7–8 band
+        expect(Grades.credits(percent: 0, ibLevels: [6, 7], kind: .test, earnRate: 1) == 3)     // average 6.5 rounds to 7
+        expect(Grades.credits(percent: 0, ibLevels: [5, 5, 6], kind: .quiz, earnRate: 1) == 1)
+        expect(Grades.credits(percent: 50, ibLevels: [4], kind: .test, earnRate: 1) == 1)       // 3–4 band
+        expect(Grades.credits(percent: 25, ibLevels: [2, 2], kind: .test, earnRate: 1) == 0)
+        expect(Grades.credits(percent: 92, ibLevels: [], kind: .test, earnRate: 1) == 3)        // no levels: percentage
     }
 
     func samePictureIsRecognised() {
@@ -1815,7 +1823,11 @@ struct GradeRules {
         if case let .success(r) = Auditor.parseGrade(cliOutput: cli(#"{"verdict":"reject","reason":"No mark on it.","percent":250}"#)) {
             expect(!r.accepted && r.percent == 100)
         } else { expect(false) }
+        if case let .success(r) = Auditor.parseGrade(cliOutput: cli(#"{"verdict":"accept","reason":"Marked.","course":"Science","assessment":"Cells Test","score":"A 6/8, B 7/8","percent":81.25,"levels":[6,"7",11],"kind":"test"}"#)) {
+            expect(r.ibLevels == [6, 7, 8])
+        } else { expect(false) }
         if case .success = Auditor.parseGrade(cliOutput: cli(#"{"reason":"?"}"#)) { expect(false) }
+        expect(Auditor.gradeRules.contains("IB MYP"))
         expect(Auditor.gradePrompt(files: ["/x/grade.png"], alreadyCounted: ["Math | Unit 1 Test"], note: "")
                .contains("- Math | Unit 1 Test"))
     }
