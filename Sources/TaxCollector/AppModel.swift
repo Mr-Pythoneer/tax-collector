@@ -70,6 +70,8 @@ final class AppModel {
     var setupError: String?
     /// Credits, free time, the watchlist, passes and the wishlist.
     var rewards: RewardsState
+    /// Grade pictures are read one at a time, so each sees the ones before it as already counted.
+    var gradeQueue: Task<Void, Never>?
     /// The watchlist item in front right now, if any (set by the checkpoint watcher).
     var watchedInFront: WatchItem?
 

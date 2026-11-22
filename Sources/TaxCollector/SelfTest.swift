@@ -843,11 +843,19 @@ enum SelfTest {
             check("grades: an IB test at levels 6 and 5 earns 6 credits (not 0 for 69%)",
                   model.rewards.grades.last?.decision == .accepted && model.rewards.grades.last?.ibLevels == [6, 5]
                   && abs(model.balance - beforeIB - 6) < 0.01, "\(String(describing: model.rewards.grades.last))")
+            model.settings.claudePath = fakeClaude("claude-grade-criterion", #"{"verdict":"accept","reason":"Criterion D is marked.","course":"MYP Year 3 Mathematics","assessment":"Number Sense Test (Criterion D)","score":"7/8","percent":87.5,"levels":[7],"kind":"test"}"#)
+            let beforeTwo = model.balance
+            check("grades: two pictures shown at once both go to Claude",
+                  model.submitGrade(gradePicture(5)) == nil && model.submitGrade(gradePicture(6)) == nil)
+            _ = await wait { model.rewards.grades.suffix(2).allSatisfy { $0.decision != nil } }
+            check("grades: two pictures of one test shown at once count once",
+                  model.rewards.grades.suffix(2).map(\.decision) == [.accepted, .duplicate]
+                  && abs(model.balance - beforeTwo - 9) < 0.01, "\(model.rewards.grades.suffix(2).map(\.decision))")
             model.settings.claudePath = fakeClaude("claude-grade-reject", #"{"verdict":"reject","reason":"There's no mark on it.","percent":0,"kind":"assignment"}"#)
             _ = model.submitGrade(gradePicture(3))
             _ = await wait { model.rewards.grades.last?.decision != nil }
             check("grades: unmarked work is rejected, no credits", model.rewards.grades.last?.decision == .rejected
-                  && abs(model.balance - beforeIB - 6) < 0.01)
+                  && abs(model.balance - beforeTwo - 9) < 0.01)
             check("grades: a rejected picture can be shown again", model.submitGrade(gradePicture(3)) == nil)
             _ = await wait { model.rewards.grades.last?.decision != nil }
 

@@ -1813,6 +1813,29 @@ struct GradeRules {
         expect(Grades.alreadyCounted(different, among: [shown, different]) == nil)
     }
 
+    func criteriaOfOneTestCountOnce() {
+        let d = GradeClaim(at: Date(), file: "a.png", fileHash: "a", pictureHash: nil, decision: .accepted,
+                           course: "MYP Year 3 Mathematics", assessment: "Number Sense Test - Operations with Integers (Criterion D)")
+        let other = GradeClaim(at: Date(), file: "b.png", fileHash: "b", pictureHash: nil, decision: .accepted,
+                               course: "Mathematics", assessment: "Number Sense Test: Operations with Integers")
+        expect(Grades.alreadyCounted(other, among: [d, other])?.id == d.id)
+        let criteriaAB = GradeClaim(at: Date(), file: "c.png", fileHash: "c", pictureHash: nil, decision: .accepted,
+                                    course: "Maths", assessment: "Number Sense Test: Operations with Integers, Criteria A and B")
+        expect(Grades.alreadyCounted(criteriaAB, among: [d, criteriaAB]) == nil)   // "Maths" isn't "Mathematics"
+        let science8 = GradeClaim(at: Date(), file: "e.png", fileHash: "e", pictureHash: nil, decision: .accepted,
+                                  course: "Science 8", assessment: "Cells Test (Criterion A)")
+        let science = GradeClaim(at: Date(), file: "f.png", fileHash: "f", pictureHash: nil,
+                                 course: "Science", assessment: "Cells Test Criterion B")
+        expect(Grades.alreadyCounted(science, among: [science8, science])?.id == science8.id)
+        // Different work in the same class still counts.
+        let part2 = GradeClaim(at: Date(), file: "g.png", fileHash: "g", pictureHash: nil,
+                               course: "History", assessment: "UGR part 2")
+        let part1 = GradeClaim(at: Date(), file: "h.png", fileHash: "h", pictureHash: nil, decision: .accepted,
+                               course: "History", assessment: "UGR part 1")
+        expect(Grades.alreadyCounted(part2, among: [part1, part2]) == nil)
+        expect(Auditor.gradeRules.contains("IB summative") && Auditor.gradeRules.contains("Another criterion"))
+    }
+
     func readingClaudesAnswer() {
         func cli(_ text: String) -> Data {
             try! JSONSerialization.data(withJSONObject: ["type": "result", "is_error": false, "result": text])
@@ -2154,6 +2177,7 @@ let checks: [(String, () -> Void)] = [
     ("GradeRules.creditsByMarkAndKind", { GradeRules().creditsByMarkAndKind() }),
     ("GradeRules.samePictureIsRecognised", { GradeRules().samePictureIsRecognised() }),
     ("GradeRules.readingClaudesAnswer", { GradeRules().readingClaudesAnswer() }),
+    ("GradeRules.criteriaOfOneTestCountOnce", { GradeRules().criteriaOfOneTestCountOnce() }),
     ("AssignmentCenterImport.rowsBecomeAssignments", { AssignmentCenterImport().rowsBecomeAssignments() }),
     ("AssignmentCenterImport.eachAssignmentOnce", { AssignmentCenterImport().eachAssignmentOnce() }),
     ("AssignmentCenterImport.signingInDoesntDuplicate", { AssignmentCenterImport().signingInDoesntDuplicate() }),

@@ -750,10 +750,25 @@ public enum Grades {
         return Credits.rounded(kind.weight * f * rate)
     }
 
+    /// Class and assessment, ignoring what differs between pictures of the same test: which IB criterion it shows
+    /// ("(Criterion D)", "Criteria A and B"), "MYP Year 3", punctuation and case.
     public static func contentKey(course: String, assessment: String) -> String {
-        Blackbaud.plainText(course + "|" + assessment).lowercased().unicodeScalars
-            .filter { CharacterSet.alphanumerics.contains($0) || $0 == "|" }
-            .map(String.init).joined()
+        courseKey(course) + "|" + assessmentKey(assessment)
+    }
+
+    public static func courseKey(_ course: String) -> String {
+        squash(Blackbaud.plainText(course).lowercased()
+            .replacingOccurrences(of: #"\bmyp\s*(year\s*)?\d*\b"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\b(grade|year)\s*\d+\b"#, with: " ", options: .regularExpression))
+    }
+
+    public static func assessmentKey(_ assessment: String) -> String {
+        squash(Blackbaud.plainText(assessment).lowercased()
+            .replacingOccurrences(of: #"\bcriteri(on|a)\s*[a-d]\b(\s*(,|&|and)\s*[a-d]\b)*"#, with: " ", options: .regularExpression))
+    }
+
+    private static func squash(_ s: String) -> String {
+        s.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.map(String.init).joined()
     }
 
     public static func distance(_ a: UInt64, _ b: UInt64) -> Int { (a ^ b).nonzeroBitCount }
@@ -803,8 +818,13 @@ public enum Grades {
 
     /// The earlier accepted claim for the same class and assessment, if any.
     public static func alreadyCounted(_ claim: GradeClaim, among claims: [GradeClaim]) -> GradeClaim? {
-        let key = claim.contentKey
-        guard key.count > 2 else { return nil }
-        return claims.first { $0.id != claim.id && $0.decision == .accepted && $0.contentKey == key }
+        let course = courseKey(claim.course), assessment = assessmentKey(claim.assessment)
+        guard assessment.count > 2 else { return nil }
+        return claims.first {
+            guard $0.id != claim.id, $0.decision == .accepted, assessmentKey($0.assessment) == assessment else { return false }
+            // The same class, however it was written ("Mathematics" or "MYP Year 3 Mathematics").
+            let other = courseKey($0.course)
+            return other == course || other.isEmpty || course.isEmpty || other.contains(course) || course.contains(other)
+        }
     }
 }

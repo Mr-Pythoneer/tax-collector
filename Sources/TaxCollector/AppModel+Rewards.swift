@@ -305,13 +305,14 @@ extension AppModel {
         rewards.grades.append(claim)
         saveRewards()
         store.log("GRADE sent \(file.lastPathComponent) to Claude")
-        let counted = rewards.grades.filter { $0.decision == .accepted }.map { "\($0.course) | \($0.assessment)" }
-        let settings = self.settings
-        let tokenFile = self.tokenFile
         let id = claim.id
-        Task {
+        let previous = gradeQueue
+        gradeQueue = Task {
+            // Wait for any picture shown just before, so two pictures of one test can't both count.
+            await previous?.value
+            let counted = self.rewards.grades.filter { $0.decision == .accepted }.map { "\($0.course) | \($0.assessment)" }
             let result = await ProofVerifier.readGrade(files: [saved.path], alreadyCounted: counted, note: note,
-                                                       folder: folder, settings: settings, tokenFile: tokenFile)
+                                                       folder: folder, settings: self.settings, tokenFile: self.tokenFile)
             self.recordGrade(id, result: result)
         }
         return nil
