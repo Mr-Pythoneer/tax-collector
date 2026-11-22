@@ -843,6 +843,19 @@ enum SelfTest {
             check("grades: an IB test at levels 6 and 5 earns 6 credits (not 0 for 69%)",
                   model.rewards.grades.last?.decision == .accepted && model.rewards.grades.last?.ibLevels == [6, 5]
                   && abs(model.balance - beforeIB - 6) < 0.01, "\(String(describing: model.rewards.grades.last))")
+            // The to-do list: nothing on it touches tasks, locks or credits, and it's saved.
+            let tasksBefore = model.tasks.count, balanceBefore = model.balance
+            let chores = model.addTodo("Clean my room")
+            _ = model.addTodo("Desk", under: chores?.id)
+            _ = model.addTodo("Call Grandma at 5")
+            if let chores { model.setTodoDone(chores.id, true) }
+            check("todo: items and steps are added, ticking a parent ticks its steps",
+                  model.todos.count == 3 && model.todos.filter(\.isDone).count == 2)
+            check("todo: nothing touches tasks or credits", model.tasks.count == tasksBefore
+                  && abs(model.balance - balanceBefore) < 0.001)
+            check("todo: the list is saved", model.store.loadTodos().count == 3)
+            model.clearDoneTodos()
+            check("todo: clearing completed keeps the rest", model.store.loadTodos().map(\.title) == ["Call Grandma at 5"])
             model.settings.claudePath = fakeClaude("claude-grade-criterion", #"{"verdict":"accept","reason":"Criterion D is marked.","course":"MYP Year 3 Mathematics","assessment":"Number Sense Test (Criterion D)","score":"7/8","percent":87.5,"levels":[7],"kind":"test"}"#)
             let beforeTwo = model.balance
             check("grades: two pictures shown at once both go to Claude",

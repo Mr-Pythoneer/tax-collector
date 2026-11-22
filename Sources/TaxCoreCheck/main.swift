@@ -1736,6 +1736,53 @@ extension AssignmentCenterImport {
     }
 }
 
+struct TodoRules {
+    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func addingAndNesting() {
+        var items: [TodoItem] = []
+        expect(Todos.add("   ", to: &items, now: t0) == nil && items.isEmpty)
+        let room = Todos.add("  Clean my room ", to: &items, now: t0)!
+        expect(room.title == "Clean my room" && room.parent == nil)
+        let desk = Todos.add("Desk", under: room.id, to: &items, now: t0)!
+        expect(desk.parent == room.id)
+        // A step under a step goes under the top item: one level deep.
+        let drawer = Todos.add("Drawer", under: desk.id, to: &items, now: t0)!
+        expect(drawer.parent == room.id)
+        expect(Todos.add("Ghost", under: UUID(), to: &items, now: t0) == nil)
+        expect(Todos.children(of: room.id, in: items).map(\.title) == ["Desk", "Drawer"])
+        expect(Todos.topLevel(items).map(\.title) == ["Clean my room"])
+        expect(Todos.add(String(repeating: "x", count: 500), to: &items, now: t0)!.title.count == Todos.maxTitle)
+    }
+
+    func tickingAndClearing() {
+        var items: [TodoItem] = []
+        let room = Todos.add("Clean my room", to: &items, now: t0)!
+        let desk = Todos.add("Desk", under: room.id, to: &items, now: t0)!
+        let call = Todos.add("Call Grandma at 5", to: &items, now: t0)!
+        Todos.setDone(room.id, true, in: &items, now: t0)
+        expect(items.first { $0.id == desk.id }!.isDone)                     // ticking a parent ticks its steps
+        expect(Todos.openCount(items) == 1)
+        Todos.setDone(desk.id, false, in: &items, now: t0)
+        expect(!items.first { $0.id == room.id }!.isDone)                    // reopening a step reopens its parent
+        Todos.setDone(desk.id, true, in: &items, now: t0)
+        expect(!items.first { $0.id == room.id }!.isDone)                    // the last step doesn't close the parent
+        _ = Todos.add("Bed", under: room.id, to: &items, now: t0)
+        Todos.setDone(room.id, true, in: &items, now: t0)
+        _ = Todos.add("Floor", under: room.id, to: &items, now: t0)
+        expect(!items.first { $0.id == room.id }!.isDone)                    // a new step reopens it
+        Todos.rename(call.id, to: "  ", in: &items)
+        expect(items.first { $0.id == call.id }!.title == "Call Grandma at 5")
+        Todos.rename(call.id, to: "Call Grandma at 6", in: &items)
+        expect(items.first { $0.id == call.id }!.title == "Call Grandma at 6")
+        Todos.setDone(call.id, true, in: &items, now: t0)
+        Todos.clearDone(&items)
+        expect(items.map(\.title) == ["Clean my room", "Floor"])
+        Todos.remove(room.id, from: &items)
+        expect(items.isEmpty)                                                // deleting removes its steps too
+    }
+}
+
 struct GradeRules {
     /// A made-up "rubric": stripes and blocks whose layout depends on `seed`.
     func picture(seed: Int, width: Int = 800, height: Int = 600) -> CGImage {
@@ -2178,6 +2225,8 @@ let checks: [(String, () -> Void)] = [
     ("GradeRules.samePictureIsRecognised", { GradeRules().samePictureIsRecognised() }),
     ("GradeRules.readingClaudesAnswer", { GradeRules().readingClaudesAnswer() }),
     ("GradeRules.criteriaOfOneTestCountOnce", { GradeRules().criteriaOfOneTestCountOnce() }),
+    ("TodoRules.addingAndNesting", { TodoRules().addingAndNesting() }),
+    ("TodoRules.tickingAndClearing", { TodoRules().tickingAndClearing() }),
     ("AssignmentCenterImport.rowsBecomeAssignments", { AssignmentCenterImport().rowsBecomeAssignments() }),
     ("AssignmentCenterImport.eachAssignmentOnce", { AssignmentCenterImport().eachAssignmentOnce() }),
     ("AssignmentCenterImport.signingInDoesntDuplicate", { AssignmentCenterImport().signingInDoesntDuplicate() }),

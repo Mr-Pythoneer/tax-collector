@@ -444,6 +444,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         } else if kind == "checkpoint", let item = model.watchlist.first {
             content = AnyView(CheckpointView(item: item, onLeave: {}))
             size = NSSize(width: 900, height: 560)
+        } else if kind == "todo" {
+            content = AnyView(TodoListView())
+            size = NSSize(width: 620, height: 520)
         } else if kind == "main" {
             content = AnyView(MainView(openLockWindow: {}))
             size = NSSize(width: 680, height: 620)

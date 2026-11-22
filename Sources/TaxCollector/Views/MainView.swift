@@ -46,6 +46,7 @@ struct MainView: View {
     @Environment(AppModel.self) private var model
     @Environment(Router.self) private var router
     var openLockWindow: () -> Void
+    @AppStorage("mainTab") private var tab: MainTab = .assignments
 
     var body: some View {
         @Bindable var router = router
@@ -55,7 +56,22 @@ struct MainView: View {
             } else if model.guardian == nil {
                 OnboardingView()
             } else {
-                TaskListView(openLockWindow: openLockWindow)
+                Group {
+                    switch tab {
+                    case .assignments: TaskListView(openLockWindow: openLockWindow)
+                    case .todo: TodoListView()
+                    }
+                }
+                .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        Picker("Show", selection: $tab) {
+                            ForEach(MainTab.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .help("Assignments, or your own to-do list")
+                    }
+                }
             }
         }
         .frame(minWidth: 540, minHeight: 460)

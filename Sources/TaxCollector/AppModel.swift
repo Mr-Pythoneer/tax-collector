@@ -72,6 +72,8 @@ final class AppModel {
     var rewards: RewardsState
     /// Grade pictures are read one at a time, so each sees the ones before it as already counted.
     var gradeQueue: Task<Void, Never>?
+    /// The plain to-do list: no due dates, no credits, never locks.
+    var todos: [TodoItem]
     /// The watchlist item in front right now, if any (set by the checkpoint watcher).
     var watchedInFront: WatchItem?
 
@@ -155,6 +157,7 @@ final class AppModel {
             loadedRewards.grades[g].reason = "The check was interrupted. Show it again."
         }
         rewards = loadedRewards
+        todos = store.loadTodos()
         enforcer = Enforcer(dryRun: dryRun)
         now = LockPolicy.effectiveNow(systemNow: Date(), lastSeen: settings.lastSeen)
 

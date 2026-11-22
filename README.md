@@ -20,6 +20,10 @@ The main window lists what's due, soonest first, grouped by day (Overdue, Today,
 
 The app is light by default. **Appearance** in the menu bar menu switches to Dark or Match System.
 
+## To-Do list
+
+The **Assignments / To-Do** switch at the top of the main window opens a plain to-do list for everything else: clean your room, call someone at 5, finish a paragraph. Type and press Return to add one. Right-click an item (or hover and click the arrow) to add steps under it, one level deep; ticking an item ticks its steps. Hover and click × to delete one, or **Clear Completed** to drop everything ticked. Nothing on this list has a due date, needs proof, earns credits or locks anything. It's saved in `todo.json`.
+
 ## Rules
 
 - **Proof** is checked by the local `claude` CLI, and a rejection means the task is still owed. Proof can be files, or a written account for things a file can't show, like a playing test. A written account is accepted only if it's specific and believable for the task.
