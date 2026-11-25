@@ -402,8 +402,13 @@ struct TaskRow: View {
                             .help("Due within 24 hours, so it can't be changed or deleted without your guardian.")
                     }
                 }
-                if let course = parts.course {
-                    Text(course).font(.caption).foregroundStyle(.secondary)
+                if parts.course != nil || task.sourceLabel != nil {
+                    HStack(spacing: 6) {
+                        if let course = parts.course {
+                            Text(course).font(.caption).foregroundStyle(.secondary)
+                        }
+                        SourceTag(task)
+                    }
                 }
                 if !task.details.isEmpty {
                     Text(task.details)
@@ -555,6 +560,7 @@ struct CompletedRow: View {
             Text(parts.title)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+            SourceTag(task)
             if case .done = task.blackbaudMark {
                 Image(systemName: "graduationcap.fill")
                     .font(.caption)

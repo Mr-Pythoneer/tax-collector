@@ -1654,6 +1654,16 @@ extension AssignmentCenterImport {
         expect(Set(r.added.map(\.title)) == ["Mathematics - MTH1W - MS - 1: Algebra - Lesson 2 Adding and Subtracting Polynomials",
                                              "Science 8- SNC8 - 8D: Levels of Organizations - Cells, Tissues, Organs"])
         expect(r.state.dismissed.isSuperset(of: ["center:1", "center:5", "center:6", "center:9"]))
+        // Each Teams task says it's on Blackbaud too; the Science lab, only in Teams, doesn't.
+        expect(r.tasks.prefix(4).map(\.alsoOnBlackbaud) == ["center:1", "center:5", "center:6", "center:9"])
+        expect(r.tasks.prefix(4).allSatisfy { $0.sourceLabel == "Teams and Blackbaud" })
+        expect(r.tasks[4].alsoOnBlackbaud == nil && r.tasks[4].sourceLabel == "Teams")
+        expect(r.added.allSatisfy { $0.sourceLabel == "Blackbaud" })
+        // Copies skipped before this was kept track of get the note on the next check.
+        let unmarked = r.tasks.map { t -> TaxTask in var t = t; t.alsoOnBlackbaud = nil; return t }
+        let again = Blackbaud.sync(tasks: unmarked, state: r.state, assignments: listed, now: now)
+        expect(again.added.isEmpty && again.tasks.prefix(4).map(\.alsoOnBlackbaud) == ["center:1", "center:5", "center:6", "center:9"])
+        expect(TaxTask(title: "Clean room", dueDate: now, createdAt: now).sourceLabel == nil)
         // Copies 0.10.5 already made are removed, each against the right Teams task.
         var state = BlackbaudState()
         var copies: [TaxTask] = []
@@ -1663,6 +1673,7 @@ extension AssignmentCenterImport {
         }
         let merged = Blackbaud.mergeDuplicates(teamsTasks + copies, state: state)
         expect(merged.removed.count == 4 && merged.tasks.count == teamsTasks.count)
+        expect(merged.tasks.prefix(4).map(\.alsoOnBlackbaud) == ["center:1", "center:5", "center:6", "center:9"])
     }
 
     func realDateWinsOverFeedDate() {

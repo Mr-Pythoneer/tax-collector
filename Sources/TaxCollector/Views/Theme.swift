@@ -125,3 +125,33 @@ extension TaxTask {
         return .secondary
     }
 }
+
+/// Where a task came from: Teams, Blackbaud, or both when the teacher posted it in each.
+/// Typed-in tasks show nothing unless the same work is also on Blackbaud.
+struct SourceTag: View {
+    let task: TaxTask
+    init(_ task: TaxTask) { self.task = task }
+
+    var body: some View {
+        if let label = task.sourceLabel {
+            HStack(spacing: 3) {
+                if task.isFromTeams { Image(systemName: "person.3") }
+                if task.isFromBlackbaud || task.alsoOnBlackbaud != nil { Image(systemName: "graduationcap") }
+                Text(label)
+            }
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+            .help(help)
+        }
+    }
+
+    private var help: String {
+        switch task.source {
+        case .teams where task.alsoOnBlackbaud != nil:
+            return "Posted in Teams and on Blackbaud. It's one task here, so you only hand it in once."
+        case .teams: return "Imported from Microsoft Teams"
+        case .blackbaud: return "Imported from Blackbaud"
+        case .manual: return "You added this, and the same work is on Blackbaud, so Blackbaud's copy wasn't added again."
+        }
+    }
+}

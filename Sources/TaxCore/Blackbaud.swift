@@ -364,6 +364,11 @@ public enum Blackbaud {
             tasks: tasks)
 
         for (n, item) in assignments.enumerated() {
+            // The same work is already a task from Teams (or typed in): say on that task that it's on Blackbaud too,
+            // including for copies skipped before Tax Collector kept track of this.
+            if let other = alsoInTeams[n], tasks[other].alsoOnBlackbaud != item.uid {
+                tasks[other].alsoOnBlackbaud = item.uid
+            }
             if let i = owner[n] {
                 // Blackbaud gave it a new UID: carry the history over to it.
                 if case let .blackbaud(oldUID) = tasks[i].source, oldUID != item.uid {
@@ -477,6 +482,7 @@ public enum Blackbaud {
     /// Older versions imported a second copy whenever Blackbaud changed its UIDs. Keep one task per assignment
     /// (the one with the most progress), and only drop copies that have no proof and aren't done.
     public static func mergeDuplicates(_ tasks: [TaxTask], state: BlackbaudState) -> (tasks: [TaxTask], removed: [TaxTask]) {
+        var tasks = tasks
         var groups: [String: [Int]] = [:]
         for (i, task) in tasks.enumerated() {
             guard case let .blackbaud(uid) = task.source else { continue }
@@ -498,8 +504,9 @@ public enum Blackbaud {
         for (i, task) in tasks.enumerated() where !drop.contains(i) && task.isPending && task.proofs.isEmpty {
             guard case let .blackbaud(uid) = task.source, let seen = state.lastSeen[uid], seen.isFromCenter else { continue }
             let others = Set(tasks.indices.filter { tasks[$0].createdAt >= task.createdAt || drop.contains($0) })
-            if earlierCopy(of: seen, tasks: tasks, state: state, excluding: others) != nil {
+            if let kept = earlierCopy(of: seen, tasks: tasks, state: state, excluding: others) {
                 drop.insert(i)
+                if !tasks[kept].isFromBlackbaud { tasks[kept].alsoOnBlackbaud = uid }
             } else {
                 centerCopies.append((i, seen))
             }
@@ -508,6 +515,7 @@ public enum Blackbaud {
         for (i, other) in crossSourcePairs(items: centerCopies, tasks: tasks, allowed: { !drop.contains($0) })
         where tasks[other].createdAt < tasks[i].createdAt {
             drop.insert(i)
+            if case let .blackbaud(uid) = tasks[i].source { tasks[other].alsoOnBlackbaud = uid }
         }
         let removed = drop.sorted().map { tasks[$0] }
         return (tasks.enumerated().filter { !drop.contains($0.offset) }.map(\.element), removed)

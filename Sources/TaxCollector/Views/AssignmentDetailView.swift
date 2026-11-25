@@ -63,6 +63,9 @@ struct AssignmentDetailView: View {
                 .font(.title2.bold())
                 .fixedSize(horizontal: false, vertical: true)
             if parts.course != nil { CourseLabel(task) }
+            if let from = fromText(task) {
+                Text(from).font(.callout).foregroundStyle(.secondary)
+            }
             HStack(spacing: 6) {
                 Text("Due \(Fmt.dateTime.string(from: task.dueDate))")
                 if task.isPending {
@@ -179,6 +182,14 @@ struct AssignmentDetailView: View {
                     .padding(.vertical, 1)
                 }
             }
+        }
+    }
+
+    private func fromText(_ task: TaxTask) -> String? {
+        switch task.source {
+        case .teams: return task.alsoOnBlackbaud == nil ? "From Teams" : "From Teams. The teacher also posted it on Blackbaud."
+        case .blackbaud: return "From Blackbaud"
+        case .manual: return task.alsoOnBlackbaud == nil ? nil : "Added by you. The teacher also posted it on Blackbaud."
         }
     }
 

@@ -123,6 +123,9 @@ public struct TaxTask: Codable, Identifiable, Equatable, Sendable {
     public var extensions: [Extension]?
     /// The repeating task this is one week's copy of.
     public var seriesID: UUID?
+    /// The same work as posted on Blackbaud, when this task came from Teams (or was typed in) and Blackbaud's
+    /// copy was skipped so it wouldn't be a second task. Its Blackbaud UID ("center:<indexID>").
+    public var alsoOnBlackbaud: String?
 
     public init(id: UUID = UUID(), title: String, details: String = "", dueDate: Date,
                 createdAt: Date, source: TaskSource = .manual, status: TaskStatus = .pending,
@@ -147,6 +150,15 @@ public struct TaxTask: Codable, Identifiable, Equatable, Sendable {
     public var isFromTeams: Bool {
         if case .teams = source { return true }
         return false
+    }
+
+    /// Where it came from, for the list: "Teams", "Blackbaud", "Teams and Blackbaud", or nil when typed in.
+    public var sourceLabel: String? {
+        switch source {
+        case .teams: return alsoOnBlackbaud == nil ? "Teams" : "Teams and Blackbaud"
+        case .blackbaud: return "Blackbaud"
+        case .manual: return alsoOnBlackbaud == nil ? nil : "Also on Blackbaud"
+        }
     }
 
     /// From a school system, so its title starts with the class ("Mathematics 8: Lesson 4").
